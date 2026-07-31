@@ -39,3 +39,23 @@ _Avoid_: Snapshot of current wording, implementation freeze, repository grep
 **TDD Test Intent**:
 The discipline that a test should state the capability promise first, then drive the implementation toward satisfying that promise with the smallest necessary proof.
 _Avoid_: After-the-fact assertion pile, historical cleanup lock, style policing by test
+
+**Live Contract**:
+A stable, undated normative contract that defines current repository behavior and may be consumed by the runtime or default verification.
+_Avoid_: Current plan, dated status page, historical proof
+
+**Entry Document**:
+A human-facing navigation or operating guide that points readers to live contracts without owning runtime truth.
+_Avoid_: Canonical contract, executable policy
+
+**Release Artifact**:
+Run-specific requirements, plans, status, and proof retained with CI or a release instead of the tracked live documentation surface.
+_Avoid_: Live documentation, permanent repository status page
+
+**Historical Record**:
+Completed or superseded governance material preserved through Git history or release artifacts and excluded from the live control plane.
+_Avoid_: Current contract, default verification dependency
+
+**Live Documentation Budget**:
+The bounded set of tracked human-facing Markdown documents maintained as current repository guidance, capped at thirty documents across the root, `docs`, and `references` surfaces.
+_Avoid_: Unbounded archive, dated worklog collection
