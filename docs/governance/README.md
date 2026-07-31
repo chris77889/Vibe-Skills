@@ -12,6 +12,10 @@ If you are reading old consolidation, cleanup, or hard-removal passes, go to [`.
 
 current runtime truth and routing compatibility contracts live here first.
 
+- [`../../config/live-document-contract.json`](../../config/live-document-contract.json)
+  is the executable inventory for the bounded live-document surface and the
+  shared requirement, plan, status, and proof artifact sink. Manifest artifact
+  paths resolve relative to the declared per-run artifact root.
 - [`current-runtime-field-contract.md`](current-runtime-field-contract.md)
   defines the current runtime truth vocabulary and the work-first artifact order.
 - [`current-routing-contract.md`](current-routing-contract.md)
