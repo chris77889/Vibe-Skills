@@ -156,6 +156,12 @@ function Complete-VibeGovernedRuntimeStop {
     }
     $requirementDocPath = if (
         $Requirement -and
+        $Requirement.PSObject.Properties.Name -contains 'primary_requirement_path' -and
+        -not [string]::IsNullOrWhiteSpace([string]$Requirement.primary_requirement_path)
+    ) {
+        [string]$Requirement.primary_requirement_path
+    } elseif (
+        $Requirement -and
         $Requirement.PSObject.Properties.Name -contains 'requirement_doc_path' -and
         -not [string]::IsNullOrWhiteSpace([string]$Requirement.requirement_doc_path)
     ) {
@@ -163,6 +169,11 @@ function Complete-VibeGovernedRuntimeStop {
     } else {
         ''
     }
+    $legacyRequirementDocPath = if (
+        $Requirement -and
+        $Requirement.PSObject.Properties.Name -contains 'legacy_requirement_doc_path' -and
+        -not [string]::IsNullOrWhiteSpace([string]$Requirement.legacy_requirement_doc_path)
+    ) { [string]$Requirement.legacy_requirement_doc_path } else { '' }
     $requirementReceiptPath = if (
         $Requirement -and
         $Requirement.PSObject.Properties.Name -contains 'receipt_path' -and
@@ -182,6 +193,22 @@ function Complete-VibeGovernedRuntimeStop {
     } else {
         ''
     }
+    $executionPlanPath = if (
+        $Plan -and
+        $Plan.PSObject.Properties.Name -contains 'primary_plan_path' -and
+        -not [string]::IsNullOrWhiteSpace([string]$Plan.primary_plan_path)
+    ) {
+        [string]$Plan.primary_plan_path
+    } elseif ($Plan) {
+        [string]$Plan.execution_plan_path
+    } else {
+        ''
+    }
+    $legacyExecutionPlanPath = if (
+        $Plan -and
+        $Plan.PSObject.Properties.Name -contains 'legacy_execution_plan_path' -and
+        -not [string]::IsNullOrWhiteSpace([string]$Plan.legacy_execution_plan_path)
+    ) { [string]$Plan.legacy_execution_plan_path } else { '' }
 
     $criticalArtifactPaths = @(
         [string]$Skeleton.receipt_path,
@@ -191,7 +218,7 @@ function Complete-VibeGovernedRuntimeStop {
         $interviewReceiptPath,
         $requirementDocPath,
         $requirementReceiptPath,
-        $(if ($Plan) { [string]$Plan.execution_plan_path } else { '' }),
+        $executionPlanPath,
         $(if ($Plan) { [string]$Plan.module_work_plan_path } else { '' }),
         $(if ($Plan) { [string]$Plan.receipt_path } else { '' }),
         $(if ($Execute) { [string]$Execute.receipt_path } else { '' }),
@@ -222,6 +249,61 @@ function Complete-VibeGovernedRuntimeStop {
         throw 'Missing Python-built runtime-input-packet.json.'
     }
 
+    $contractWorkspaceRoot = if (
+        $StorageProjection -and
+        $StorageProjection.PSObject.Properties.Name -contains 'workspace_root' -and
+        -not [string]::IsNullOrWhiteSpace([string]$StorageProjection.workspace_root)
+    ) {
+        [string]$StorageProjection.workspace_root
+    } else {
+        Resolve-VibeContractWorkspaceRoot -RepoRoot ([string]$runtime.repo_root) -ArtifactRoot $ArtifactBaseRoot
+    }
+    $legacyDocumentationWrites = @(
+        $legacyRequirementDocPath,
+        $legacyExecutionPlanPath
+    ) | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) }
+    $artifactBundle = Write-VibeRunArtifactBundle `
+        -RepoRoot ([string]$runtime.repo_root) `
+        -RunId $RunId `
+        -WorkspaceRoot $contractWorkspaceRoot `
+        -ArtifactRoot $ArtifactBaseRoot `
+        -Requirement ([pscustomobject]@{
+            task = $Task
+            requirement_doc_path = $requirementDocPath
+            legacy_requirement_doc_path = $legacyRequirementDocPath
+            receipt_path = $requirementReceiptPath
+            stage = 'requirement_doc'
+        }) `
+        -Plan $(if ($Plan) {
+            [pscustomobject]@{
+                task = $Task
+                execution_plan_path = $executionPlanPath
+                legacy_execution_plan_path = $legacyExecutionPlanPath
+                module_work_plan_path = [string]$Plan.module_work_plan_path
+                receipt_path = [string]$Plan.receipt_path
+                stage = 'xl_plan'
+            }
+        } else { $null }) `
+        -Status ([pscustomobject]@{
+            requested_stage_stop = if ($RuntimeInput.packet.PSObject.Properties.Name -contains 'requested_stage_stop') { [string]$RuntimeInput.packet.requested_stage_stop } else { $null }
+            terminal_stage = [string](Get-VibeNestedPropertySafe -InputObject $StageLineage -PropertyPath @('lineage', 'last_stage_name') -DefaultValue '')
+            proof_ready = [bool]($null -ne $DeliveryAcceptanceReport -and $null -ne $Cleanup)
+            status = if ($Cleanup) { 'completed' } elseif ($Plan) { 'ready_for_execution' } else { 'awaiting_agent_skill_organization' }
+        }) `
+        -Proof ([pscustomobject]@{
+            task = $Task
+            run_id = $RunId
+            stage_lineage_path = [string]$StageLineage.path
+            delivery_acceptance_report_path = [string]$DeliveryAcceptanceReportPath
+            cleanup_receipt_path = if ($Cleanup) { [string]$Cleanup.receipt_path } else { $null }
+        }) `
+        -LegacyWrites @($legacyDocumentationWrites) `
+        -HostId ([string]$env:VCO_HOST_ID)
+    Sync-VibeSessionArtifactsToRunRoot `
+        -SessionRoot $SessionRoot `
+        -RunArtifactRoot ([string]$artifactBundle.descriptor.artifact_root) `
+        -ArtifactDescriptor $artifactBundle.descriptor
+
     $delegationValidationReceiptPath = if ($DelegationValidation) { [string]$DelegationValidation.receipt_path } else { '' }
     $summaryArtifacts = New-VibeRuntimeSummaryArtifactProjection `
         -SkeletonReceiptPath ([string]$Skeleton.receipt_path) `
@@ -231,7 +313,7 @@ function Complete-VibeGovernedRuntimeStop {
         -IntentContractPath $interviewReceiptPath `
         -RequirementDocPath $requirementDocPath `
         -RequirementReceiptPath $requirementReceiptPath `
-        -ExecutionPlanPath $(if ($Plan) { [string]$Plan.execution_plan_path } else { '' }) `
+        -ExecutionPlanPath $executionPlanPath `
         -ExecutionPlanReceiptPath $(if ($Plan) { [string]$Plan.receipt_path } else { '' }) `
         -ModuleWorkPlanPath $(if ($Plan) { [string]$Plan.module_work_plan_path } else { '' }) `
         -ModuleExecutionPath $moduleExecutionPath `
@@ -247,6 +329,14 @@ function Complete-VibeGovernedRuntimeStop {
         -MemoryActivationMarkdownPath ([string]$MemoryActivationMarkdownPath) `
         -DelegationEnvelopePath ([string]$HierarchyState.delegation_envelope_path) `
         -DelegationValidationReceiptPath $delegationValidationReceiptPath
+    $summaryArtifacts | Add-Member -NotePropertyName 'requirement' -NotePropertyValue ([string]$artifactBundle.descriptor.paths.requirement) -Force
+    $summaryArtifacts | Add-Member -NotePropertyName 'plan' -NotePropertyValue ([string]$artifactBundle.descriptor.paths.plan) -Force
+    $summaryArtifacts | Add-Member -NotePropertyName 'status' -NotePropertyValue ([string]$artifactBundle.descriptor.paths.status) -Force
+    $summaryArtifacts | Add-Member -NotePropertyName 'proof' -NotePropertyValue ([string]$artifactBundle.descriptor.paths.proof) -Force
+    $summaryArtifacts | Add-Member -NotePropertyName 'artifact_manifest' -NotePropertyValue ([string]$artifactBundle.descriptor.paths.manifest) -Force
+    $summaryArtifacts | Add-Member -NotePropertyName 'legacy_compatibility' -NotePropertyValue ([string]$artifactBundle.descriptor.paths.legacy_compatibility) -Force
+    $summaryArtifacts | Add-Member -NotePropertyName 'legacy_requirement_doc' -NotePropertyValue $legacyRequirementDocPath -Force
+    $summaryArtifacts | Add-Member -NotePropertyName 'legacy_execution_plan' -NotePropertyValue $legacyExecutionPlanPath -Force
     $summaryPath = Join-Path $SessionRoot 'runtime-summary.json'
     $summary = Invoke-VibePythonRuntimeSummaryFinalizer `
         -RepoRoot $runtime.repo_root `
@@ -267,8 +357,13 @@ function Complete-VibeGovernedRuntimeStop {
             host_user_briefing = $HostUserBriefing
             bounded_return_control = $BoundedReturnControl
             agent_execution_handoff = $(if ($Execute -and $Execute.PSObject.Properties.Name -contains 'agent_execution_handoff') { $Execute.agent_execution_handoff } else { $null })
+            artifact_contract = $artifactBundle.manifest
         }) `
         -SummaryPath $summaryPath
+    Sync-VibeSessionArtifactsToRunRoot `
+        -SessionRoot $SessionRoot `
+        -RunArtifactRoot ([string]$artifactBundle.descriptor.artifact_root) `
+        -ArtifactDescriptor $artifactBundle.descriptor
 
     return [pscustomobject]@{
         run_id = $RunId
@@ -279,6 +374,7 @@ function Complete-VibeGovernedRuntimeStop {
         host_stage_disclosure = $HostStageDisclosure
         host_user_briefing_path = $HostUserBriefingPath
         host_user_briefing = $HostUserBriefing
+        artifact_contract = $artifactBundle
         summary = $summary
     }
 }
@@ -556,6 +652,30 @@ if (-not [string]::IsNullOrWhiteSpace($ModuleExecutionJsonFile)) {
     $executionPlanReceiptPath = Join-Path $sessionRoot 'execution-plan-receipt.json'
     $requirementReceipt = Get-Content -LiteralPath $requirementReceiptPath -Raw -Encoding UTF8 | ConvertFrom-Json
     $executionPlanReceipt = Get-Content -LiteralPath $executionPlanReceiptPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    $reentryRequirementDocPath = if (
+        $requirementReceipt.PSObject.Properties.Name -contains 'primary_requirement_path' -and
+        -not [string]::IsNullOrWhiteSpace([string]$requirementReceipt.primary_requirement_path)
+    ) {
+        [string]$requirementReceipt.primary_requirement_path
+    } else {
+        [string]$executionPlanReceipt.requirement_doc_path
+    }
+    $reentryExecutionPlanPath = if (
+        $executionPlanReceipt.PSObject.Properties.Name -contains 'primary_plan_path' -and
+        -not [string]::IsNullOrWhiteSpace([string]$executionPlanReceipt.primary_plan_path)
+    ) {
+        [string]$executionPlanReceipt.primary_plan_path
+    } else {
+        [string]$executionPlanReceipt.execution_plan_path
+    }
+    $reentryLegacyRequirementDocPath = if (
+        $requirementReceipt.PSObject.Properties.Name -contains 'legacy_requirement_doc_path' -and
+        -not [string]::IsNullOrWhiteSpace([string]$requirementReceipt.legacy_requirement_doc_path)
+    ) { [string]$requirementReceipt.legacy_requirement_doc_path } else { '' }
+    $reentryLegacyExecutionPlanPath = if (
+        $executionPlanReceipt.PSObject.Properties.Name -contains 'legacy_execution_plan_path' -and
+        -not [string]::IsNullOrWhiteSpace([string]$executionPlanReceipt.legacy_execution_plan_path)
+    ) { [string]$executionPlanReceipt.legacy_execution_plan_path } else { '' }
     $requirementContextArtifact = Get-Content -LiteralPath ([string]$requirementReceipt.memory_context_path) -Raw -Encoding UTF8 | ConvertFrom-Json
     $requirementMemoryContext = [pscustomobject]@{
         context_path = [string]$requirementReceipt.memory_context_path
@@ -678,21 +798,21 @@ if (-not [string]::IsNullOrWhiteSpace($ModuleExecutionJsonFile)) {
         -Task $frozenTask `
         -Grade ([string]$executionManifestDocument.internal_grade)
     $memoryCleanupDecision = Get-VibeCleanupDecisionWriteAction `
-        -RequirementDocPath ([string]$executionPlanReceipt.requirement_doc_path) `
-        -ExecutionPlanPath ([string]$executionPlanReceipt.execution_plan_path) `
+        -RequirementDocPath $reentryRequirementDocPath `
+        -ExecutionPlanPath $reentryExecutionPlanPath `
         -Runtime $runtime `
         -SessionRoot $sessionRoot `
         -Task $frozenTask
     $memoryCleanupCognee = Get-VibeCogneeCleanupWriteAction `
         -Runtime $runtime `
         -Task $frozenTask `
-        -RequirementDocPath ([string]$executionPlanReceipt.requirement_doc_path) `
-        -ExecutionPlanPath ([string]$executionPlanReceipt.execution_plan_path) `
+        -RequirementDocPath $reentryRequirementDocPath `
+        -ExecutionPlanPath $reentryExecutionPlanPath `
         -ExecutionManifestPath $executionManifestPath `
         -SessionRoot $sessionRoot
     $memoryCleanupFold = New-VibeCleanupMemoryFold `
-        -RequirementDocPath ([string]$executionPlanReceipt.requirement_doc_path) `
-        -ExecutionPlanPath ([string]$executionPlanReceipt.execution_plan_path) `
+        -RequirementDocPath $reentryRequirementDocPath `
+        -ExecutionPlanPath $reentryExecutionPlanPath `
         -ExecutionManifestPath $executionManifestPath `
         -CleanupReceiptPath ([string]$cleanup.receipt_path) `
         -SessionRoot $sessionRoot
@@ -731,15 +851,59 @@ if (-not [string]::IsNullOrWhiteSpace($ModuleExecutionJsonFile)) {
     } else {
         $null
     }
+    $reentryLegacyWrites = @(
+        $reentryLegacyRequirementDocPath,
+        $reentryLegacyExecutionPlanPath
+    ) | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) }
+    $artifactBundle = Write-VibeRunArtifactBundle `
+        -RepoRoot ([string]$runtime.repo_root) `
+        -RunId $RunId `
+        -WorkspaceRoot $resolvedWorkspaceRoot `
+        -ArtifactRoot $artifactBaseRoot `
+        -Requirement ([pscustomobject]@{
+            task = $frozenTask
+            requirement_doc_path = $reentryRequirementDocPath
+            legacy_requirement_doc_path = $reentryLegacyRequirementDocPath
+            receipt_path = $requirementReceiptPath
+            stage = 'requirement_doc'
+        }) `
+        -Plan ([pscustomobject]@{
+            task = $frozenTask
+            execution_plan_path = $reentryExecutionPlanPath
+            legacy_execution_plan_path = $reentryLegacyExecutionPlanPath
+            module_work_plan_path = $moduleWorkPlanPath
+            receipt_path = $executionPlanReceiptPath
+            stage = 'xl_plan'
+        }) `
+        -Status ([pscustomobject]@{
+            requested_stage_stop = 'phase_cleanup'
+            terminal_stage = [string]$stageLineage.lineage.last_stage_name
+            proof_ready = [bool]($null -ne $deliveryAcceptanceReport -and $null -ne $cleanup)
+            status = 'completed'
+        }) `
+        -Proof ([pscustomobject]@{
+            task = $frozenTask
+            run_id = $RunId
+            stage_lineage_path = [string]$stageLineage.path
+            delivery_acceptance_report_path = if (Test-Path -LiteralPath $deliveryAcceptanceReportPath) { $deliveryAcceptanceReportPath } else { $null }
+            cleanup_receipt_path = [string]$cleanup.receipt_path
+            module_execution_path = $moduleExecutionPath
+        }) `
+        -LegacyWrites @($reentryLegacyWrites) `
+        -HostId ([string]$env:VCO_HOST_ID)
+    Sync-VibeSessionArtifactsToRunRoot `
+        -SessionRoot $sessionRoot `
+        -RunArtifactRoot ([string]$artifactBundle.descriptor.artifact_root) `
+        -ArtifactDescriptor $artifactBundle.descriptor
     $summaryArtifacts = New-VibeRuntimeSummaryArtifactProjection `
         -SkeletonReceiptPath (Join-Path $sessionRoot 'skeleton-receipt.json') `
         -RuntimeInputPacketPath $runtimeInputPath `
         -GovernanceCapsulePath $governanceCapsulePath `
         -StageLineagePath $stageLineagePath `
         -IntentContractPath ([string]$priorArtifacts.intent_contract) `
-        -RequirementDocPath ([string]$priorArtifacts.requirement_doc) `
+        -RequirementDocPath $reentryRequirementDocPath `
         -RequirementReceiptPath ([string]$priorArtifacts.requirement_receipt) `
-        -ExecutionPlanPath ([string]$priorArtifacts.execution_plan) `
+        -ExecutionPlanPath $reentryExecutionPlanPath `
         -ExecutionPlanReceiptPath ([string]$priorArtifacts.execution_plan_receipt) `
         -ModuleWorkPlanPath (Join-Path $sessionRoot 'module-work-plan.json') `
         -ModuleExecutionPath $moduleExecutionPath `
@@ -753,6 +917,14 @@ if (-not [string]::IsNullOrWhiteSpace($ModuleExecutionJsonFile)) {
         -DeliveryAcceptanceMarkdownPath $(if (Test-Path -LiteralPath $deliveryAcceptanceMarkdownPath) { $deliveryAcceptanceMarkdownPath } else { '' }) `
         -MemoryActivationReportPath ([string]$memoryActivation.report_path) `
         -MemoryActivationMarkdownPath ([string]$memoryActivation.markdown_path)
+    $summaryArtifacts | Add-Member -NotePropertyName 'requirement' -NotePropertyValue ([string]$artifactBundle.descriptor.paths.requirement) -Force
+    $summaryArtifacts | Add-Member -NotePropertyName 'plan' -NotePropertyValue ([string]$artifactBundle.descriptor.paths.plan) -Force
+    $summaryArtifacts | Add-Member -NotePropertyName 'status' -NotePropertyValue ([string]$artifactBundle.descriptor.paths.status) -Force
+    $summaryArtifacts | Add-Member -NotePropertyName 'proof' -NotePropertyValue ([string]$artifactBundle.descriptor.paths.proof) -Force
+    $summaryArtifacts | Add-Member -NotePropertyName 'artifact_manifest' -NotePropertyValue ([string]$artifactBundle.descriptor.paths.manifest) -Force
+    $summaryArtifacts | Add-Member -NotePropertyName 'legacy_compatibility' -NotePropertyValue ([string]$artifactBundle.descriptor.paths.legacy_compatibility) -Force
+    $summaryArtifacts | Add-Member -NotePropertyName 'legacy_requirement_doc' -NotePropertyValue $reentryLegacyRequirementDocPath -Force
+    $summaryArtifacts | Add-Member -NotePropertyName 'legacy_execution_plan' -NotePropertyValue $reentryLegacyExecutionPlanPath -Force
     $summary = Invoke-VibePythonRuntimeSummaryFinalizer `
         -RepoRoot $runtime.repo_root `
         -Payload ([pscustomobject]@{
@@ -773,14 +945,20 @@ if (-not [string]::IsNullOrWhiteSpace($ModuleExecutionJsonFile)) {
             bounded_return_control = $null
             agent_execution_handoff = $null
             module_execution = $moduleExecution
+            artifact_contract = $artifactBundle.manifest
         }) `
         -SummaryPath $priorSummaryPath
+    Sync-VibeSessionArtifactsToRunRoot `
+        -SessionRoot $sessionRoot `
+        -RunArtifactRoot ([string]$artifactBundle.descriptor.artifact_root) `
+        -ArtifactDescriptor $artifactBundle.descriptor
 
     return [pscustomobject]@{
         run_id = $RunId
         mode = $Mode
         session_root = $sessionRoot
         summary_path = $priorSummaryPath
+        artifact_contract = $artifactBundle
         summary = $summary
     }
 }
@@ -826,7 +1004,12 @@ if (-not [string]::IsNullOrWhiteSpace([string]$hierarchyState.delegation_envelop
     $hierarchyArgs.DelegationEnvelopePath = [string]$hierarchyState.delegation_envelope_path
 }
 
-$skeleton = & (Join-Path $PSScriptRoot 'Invoke-SkeletonCheck.ps1') -Task $Task -Mode $Mode -RunId $RunId -ArtifactRoot $artifactBaseRoot
+$skeleton = & (Join-Path $PSScriptRoot 'Invoke-SkeletonCheck.ps1') `
+    -Task $Task `
+    -Mode $Mode `
+    -RunId $RunId `
+    -ArtifactRoot $artifactBaseRoot `
+    -WorkspaceRoot $resolvedWorkspaceRoot
 $governanceCapsule = Write-VibeGovernanceCapsule `
     -SessionRoot ([string]$skeleton.session_root) `
     -RunId $RunId `
@@ -907,11 +1090,16 @@ $requirementArgs = @{
     RuntimeInputPacketPath = $runtimeInput.packet_path
     MemoryContextPath = $requirementMemoryContext.context_path
     ArtifactRoot = $artifactBaseRoot
+    WorkspaceRoot = $resolvedWorkspaceRoot
 }
 foreach ($key in @($hierarchyArgs.Keys)) {
     $requirementArgs[$key] = $hierarchyArgs[$key]
 }
 $requirement = & (Join-Path $PSScriptRoot 'Write-RequirementDoc.ps1') @requirementArgs
+$primaryRequirementDocPath = if (
+    $requirement.PSObject.Properties.Name -contains 'primary_requirement_path' -and
+    -not [string]::IsNullOrWhiteSpace([string]$requirement.primary_requirement_path)
+) { [string]$requirement.primary_requirement_path } else { [string]$requirement.requirement_doc_path }
 $stageLineage = Add-VibeStageLineageEntry `
     -SessionRoot ([string]$skeleton.session_root) `
     -RunId $RunId `
@@ -975,14 +1163,15 @@ $planArgs = @{
     Task = $Task
     Mode = $Mode
     RunId = $RunId
-    RequirementDocPath = $requirement.requirement_doc_path
+    RequirementDocPath = $primaryRequirementDocPath
     RuntimeInputPacketPath = $runtimeInput.packet_path
     ArtifactRoot = $artifactBaseRoot
+    WorkspaceRoot = $resolvedWorkspaceRoot
 }
 foreach ($key in @($hierarchyArgs.Keys)) {
     $planArgs[$key] = $hierarchyArgs[$key]
 }
-$planArgs.InheritedRequirementDocPath = $requirement.requirement_doc_path
+$planArgs.InheritedRequirementDocPath = $primaryRequirementDocPath
 $memoryPlanSerena = $null
 $memoryPlanCognee = $null
 $xlPlanReadActions = @()
@@ -994,6 +1183,10 @@ if (-not $structuredBoundedReentry) {
 $planMemoryContext = New-VibePlanMemoryContextPack -Runtime $runtime -ReadActions $xlPlanReadActions -SessionRoot ([string]$skeleton.session_root) -Stage 'xl_plan' -ArtifactName 'plan-context-pack.json'
 $planArgs.PlanMemoryContextPath = $planMemoryContext.context_path
 $plan = & (Join-Path $PSScriptRoot 'Write-XlPlan.ps1') @planArgs
+$primaryExecutionPlanPath = if (
+    $plan.PSObject.Properties.Name -contains 'primary_plan_path' -and
+    -not [string]::IsNullOrWhiteSpace([string]$plan.primary_plan_path)
+) { [string]$plan.primary_plan_path } else { [string]$plan.execution_plan_path }
 $stageLineage = Add-VibeStageLineageEntry `
     -SessionRoot ([string]$skeleton.session_root) `
     -RunId $RunId `
@@ -1052,8 +1245,8 @@ $executeArgs = @{
     Task = $Task
     Mode = $Mode
     RunId = $RunId
-    RequirementDocPath = $requirement.requirement_doc_path
-    ExecutionPlanPath = $plan.execution_plan_path
+    RequirementDocPath = $primaryRequirementDocPath
+    ExecutionPlanPath = $primaryExecutionPlanPath
     ModuleWorkPlanPath = $plan.module_work_plan_path
     RuntimeInputPacketPath = $runtimeInput.packet_path
     ArtifactRoot = $artifactBaseRoot
@@ -1174,21 +1367,21 @@ $memoryExecuteRufloWrite = New-VibeRufloExecutionWriteAction `
     -Task $Task `
     -Grade $grade
 $memoryCleanupDecision = Get-VibeCleanupDecisionWriteAction `
-    -RequirementDocPath ([string]$requirement.requirement_doc_path) `
-    -ExecutionPlanPath ([string]$plan.execution_plan_path) `
+    -RequirementDocPath $primaryRequirementDocPath `
+    -ExecutionPlanPath $primaryExecutionPlanPath `
     -Runtime $runtime `
     -SessionRoot ([string]$skeleton.session_root) `
     -Task $Task
 $memoryCleanupCognee = Get-VibeCogneeCleanupWriteAction `
     -Runtime $runtime `
     -Task $Task `
-    -RequirementDocPath ([string]$requirement.requirement_doc_path) `
-    -ExecutionPlanPath ([string]$plan.execution_plan_path) `
+    -RequirementDocPath $primaryRequirementDocPath `
+    -ExecutionPlanPath $primaryExecutionPlanPath `
     -ExecutionManifestPath ([string]$execute.execution_manifest_path) `
     -SessionRoot ([string]$skeleton.session_root)
 $memoryCleanupFold = New-VibeCleanupMemoryFold `
-    -RequirementDocPath ([string]$requirement.requirement_doc_path) `
-    -ExecutionPlanPath ([string]$plan.execution_plan_path) `
+    -RequirementDocPath $primaryRequirementDocPath `
+    -ExecutionPlanPath $primaryExecutionPlanPath `
     -ExecutionManifestPath ([string]$execute.execution_manifest_path) `
     -CleanupReceiptPath ([string]$cleanup.receipt_path) `
     -SessionRoot ([string]$skeleton.session_root)
@@ -1242,99 +1435,32 @@ if ($hostUserBriefing) {
     Write-VgoUtf8NoBomText -Path $hostUserBriefingPath -Content (([string]$hostUserBriefing.rendered_text) + [Environment]::NewLine)
 }
 
-$criticalArtifactPaths = @(
-    [string]$skeleton.receipt_path,
-    [string]$runtimeInput.packet_path,
-    [string]$governanceCapsule.path,
-    [string]$stageLineage.path,
-    [string]$interview.receipt_path,
-    [string]$requirement.requirement_doc_path,
-    [string]$requirement.receipt_path,
-    [string]$plan.execution_plan_path,
-    [string]$plan.receipt_path,
-    [string]$execute.receipt_path,
-    [string]$execute.execution_manifest_path,
-    [string]$cleanup.receipt_path,
-    [string]$memoryActivation.report_path,
-    [string]$memoryActivation.markdown_path
-) | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) }
-if (-not [string]::IsNullOrWhiteSpace($deliveryAcceptanceReportArtifactPath)) {
-    $criticalArtifactPaths += $deliveryAcceptanceReportArtifactPath
-}
-if ($hostStageDisclosure) {
-    $criticalArtifactPaths += [string]$hostStageDisclosurePath
-}
-if (-not [string]::IsNullOrWhiteSpace([string]$hostUserBriefingPath)) {
-    $criticalArtifactPaths += [string]$hostUserBriefingPath
-}
-if ($delegationValidation) {
-    $criticalArtifactPaths += [string]$delegationValidation.receipt_path
-}
-$artifactReadiness = Wait-VibeArtifactSet -Paths $criticalArtifactPaths
-
-if (-not $artifactReadiness.ready) {
-    throw ("Governed runtime returned before critical artifacts were durable. Missing: {0}" -f (@($artifactReadiness.missing) -join ', '))
-}
-
-if (-not (Test-Path -LiteralPath ([string]$runtimeInput.packet_path) -PathType Leaf)) {
-    throw 'Missing Python-built runtime-input-packet.json.'
-}
-
-$delegationValidationReceiptPath = if ($delegationValidation) { [string]$delegationValidation.receipt_path } else { '' }
-$summaryArtifacts = New-VibeRuntimeSummaryArtifactProjection `
-    -SkeletonReceiptPath ([string]$skeleton.receipt_path) `
-    -RuntimeInputPacketPath ([string]$runtimeInput.packet_path) `
-    -GovernanceCapsulePath ([string]$governanceCapsule.path) `
-    -StageLineagePath ([string]$stageLineage.path) `
-    -IntentContractPath ([string]$interview.receipt_path) `
-    -RequirementDocPath ([string]$requirement.requirement_doc_path) `
-    -RequirementReceiptPath ([string]$requirement.receipt_path) `
-    -ExecutionPlanPath ([string]$plan.execution_plan_path) `
-    -ExecutionPlanReceiptPath ([string]$plan.receipt_path) `
-    -ModuleWorkPlanPath ([string]$plan.module_work_plan_path) `
-    -ModuleExecutionPath $(if ($execute.PSObject.Properties.Name -contains 'module_execution_path') { [string]$execute.module_execution_path } else { '' }) `
-    -AgentExecutionHandoffPath $(if ($execute.PSObject.Properties.Name -contains 'agent_execution_handoff_path') { [string]$execute.agent_execution_handoff_path } else { '' }) `
-    -ExecuteReceiptPath ([string]$execute.receipt_path) `
-    -ExecutionManifestPath ([string]$execute.execution_manifest_path) `
-    -HostStageDisclosurePath $(if ($hostStageDisclosure) { [string]$hostStageDisclosurePath } else { '' }) `
+return Complete-VibeGovernedRuntimeStop `
+    -RunId $RunId `
+    -Mode $Mode `
+    -Task $Task `
+    -ArtifactBaseRoot $artifactBaseRoot `
+    -SessionRoot ([string]$skeleton.session_root) `
+    -HierarchyState $hierarchyState `
+    -StorageProjection $storageProjection `
+    -Skeleton $skeleton `
+    -RuntimeInput $runtimeInput `
+    -GovernanceCapsule $governanceCapsule `
+    -StageLineage $stageLineage `
+    -Interview $interview `
+    -Requirement $requirement `
+    -Plan $plan `
+    -Execute $execute `
+    -Cleanup $cleanup `
+    -HostStageDisclosure $hostStageDisclosure `
+    -HostStageDisclosurePath $hostStageDisclosurePath `
+    -HostUserBriefing $hostUserBriefing `
     -HostUserBriefingPath ([string]$hostUserBriefingPath) `
-    -CleanupReceiptPath ([string]$cleanup.receipt_path) `
-    -DeliveryAcceptanceReportPath $deliveryAcceptanceReportArtifactPath `
-    -DeliveryAcceptanceMarkdownPath $deliveryAcceptanceMarkdownArtifactPath `
+    -MemoryActivationReport $memoryActivation.report `
     -MemoryActivationReportPath ([string]$memoryActivation.report_path) `
     -MemoryActivationMarkdownPath ([string]$memoryActivation.markdown_path) `
-    -DelegationEnvelopePath ([string]$hierarchyState.delegation_envelope_path) `
-    -DelegationValidationReceiptPath $delegationValidationReceiptPath
-$summaryPath = Join-Path $skeleton.session_root 'runtime-summary.json'
-$summary = Invoke-VibePythonRuntimeSummaryFinalizer `
-    -RepoRoot $runtime.repo_root `
-    -Payload ([pscustomobject]@{
-        run_id = $RunId
-        mode = $Mode
-        task = $Task
-        artifact_root = $artifactBaseRoot
-        session_root = [string]$skeleton.session_root
-        hierarchy_state = $hierarchyState
-        artifacts = $summaryArtifacts
-        module_assignments = $runtimeInputPacket.module_assignments
-        stage_lineage = $stageLineage
-        storage_projection = $storageProjection
-        memory_activation_report = $memoryActivation.report
-        delivery_acceptance_report = $deliveryAcceptanceReport
-        host_stage_disclosure = $hostStageDisclosure
-        host_user_briefing = $hostUserBriefing
-        bounded_return_control = $null
-    }) `
-    -SummaryPath $summaryPath
-
-[pscustomobject]@{
-    run_id = $RunId
-    mode = $Mode
-    session_root = $skeleton.session_root
-    summary_path = $summaryPath
-    host_stage_disclosure_path = if ($hostStageDisclosure) { [string]$hostStageDisclosurePath } else { $null }
-    host_stage_disclosure = $hostStageDisclosure
-    host_user_briefing_path = $hostUserBriefingPath
-    host_user_briefing = $hostUserBriefing
-    summary = $summary
-}
+    -DeliveryAcceptanceReport $deliveryAcceptanceReport `
+    -DeliveryAcceptanceReportPath $deliveryAcceptanceReportArtifactPath `
+    -DeliveryAcceptanceMarkdownPath $deliveryAcceptanceMarkdownArtifactPath `
+    -ExecutionManifestDocument $executionManifestDocument `
+    -DelegationValidation $delegationValidation

@@ -6,6 +6,7 @@ param(
     [string]$RuntimeInputPacketPath = '',
     [string]$PlanMemoryContextPath = '',
     [string]$ArtifactRoot = '',
+    [AllowEmptyString()] [string]$WorkspaceRoot = '',
     [AllowEmptyString()] [string]$GovernanceScope = '',
     [AllowEmptyString()] [string]$RootRunId = '',
     [AllowEmptyString()] [string]$ParentRunId = '',
@@ -123,6 +124,7 @@ if ([string]::IsNullOrWhiteSpace($RunId)) {
 }
 
 $sessionRoot = Ensure-VibeSessionRoot -RepoRoot $runtime.repo_root -RunId $RunId -Runtime $runtime -ArtifactRoot $ArtifactRoot
+$artifactContract = Get-VibeArtifactContractDescriptor -RepoRoot $runtime.repo_root -RunId $RunId -WorkspaceRoot $WorkspaceRoot -ArtifactRoot $ArtifactRoot
 $hierarchyState = Get-VibeHierarchyState `
     -GovernanceScope $GovernanceScope `
     -RunId $RunId `
@@ -198,9 +200,35 @@ $planPath = if ($isChildScope) {
     }
     [string]$hierarchyState.inherited_execution_plan_path
 } else {
-    Get-VibeExecutionPlanPath -RepoRoot $runtime.repo_root -Task $Task -ArtifactRoot $ArtifactRoot
+    Get-VibeExecutionPlanPath `
+        -RepoRoot $runtime.repo_root `
+        -Task $Task `
+        -ArtifactRoot $ArtifactRoot `
+        -WorkspaceRoot $WorkspaceRoot
 }
-$requirementPath = if (-not [string]::IsNullOrWhiteSpace($RequirementDocPath)) { $RequirementDocPath } else { Get-VibeRequirementDocPath -RepoRoot $runtime.repo_root -Task $Task -ArtifactRoot $ArtifactRoot }
+$primaryPlanPath = if ($isChildScope) {
+    $planPath
+} else {
+    [string]$artifactContract.paths.primary_plan
+}
+$legacyDocumentationWrite = [bool](
+    -not $isChildScope -and
+    [string]$artifactContract.legacy_write_mode -eq 'dual_write'
+)
+$publishedPlanPath = if ($legacyDocumentationWrite) {
+    $planPath
+} else {
+    $primaryPlanPath
+}
+$requirementPath = if (-not [string]::IsNullOrWhiteSpace($RequirementDocPath)) {
+    $RequirementDocPath
+} else {
+    Get-VibeRequirementDocPath `
+        -RepoRoot $runtime.repo_root `
+        -Task $Task `
+        -ArtifactRoot $ArtifactRoot `
+        -WorkspaceRoot $WorkspaceRoot
+}
 $antiDriftDraft = Get-VgoAntiProxyGoalDriftPacketFromRequirementDoc -RequirementDocPath $requirementPath
 $requirementDocLines = if (Test-Path -LiteralPath $requirementPath) {
     @(Get-Content -LiteralPath $requirementPath -Encoding UTF8)
@@ -532,7 +560,10 @@ if ($isChildScope) {
     )
     Write-VibeMarkdownArtifact -Path $childHandoffPath -Lines $handoffLines
 } else {
-    Write-VibeMarkdownArtifact -Path $planPath -Lines $lines
+    Write-VibeMarkdownArtifact -Path $primaryPlanPath -Lines $lines
+    if ($legacyDocumentationWrite) {
+        Write-VibeMarkdownArtifact -Path $planPath -Lines $lines
+    }
 }
 
 $receipt = [pscustomobject]@{
@@ -542,7 +573,9 @@ $receipt = [pscustomobject]@{
     mode = $Mode
     internal_grade = $grade
     requirement_doc_path = $requirementPath
-    execution_plan_path = $planPath
+    execution_plan_path = $publishedPlanPath
+    primary_plan_path = $primaryPlanPath
+    legacy_execution_plan_path = if ($legacyDocumentationWrite) { $planPath } else { $null }
     module_work_plan_path = $moduleWorkPlanPath
     child_execution_handoff_path = $childHandoffPath
     canonical_write_allowed = -not $isChildScope
@@ -552,6 +585,14 @@ $receipt = [pscustomobject]@{
     plan_memory_disclosure_level = if ($planMemoryContext -and $planMemoryContext.PSObject.Properties.Name -contains 'disclosure_level') { [string]$planMemoryContext.disclosure_level } else { $null }
     plan_memory_capsule_count = @($selectedPlanMemoryCapsules).Count
     generated_at = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+    artifact_contract = [pscustomobject]@{
+        artifact_root = [string]$artifactContract.artifact_root
+        plan = [string]$artifactContract.paths.plan
+        manifest = [string]$artifactContract.paths.manifest
+        legacy_documentation_write = $legacyDocumentationWrite
+        legacy_write_mode = [string]$artifactContract.legacy_write_mode
+        legacy_removal_release = [string]$artifactContract.legacy_removal_release
+    }
 }
 $receiptPath = Join-Path $sessionRoot 'execution-plan-receipt.json'
 Write-VibeJsonArtifact -Path $receiptPath -Value $receipt
@@ -559,8 +600,13 @@ Write-VibeJsonArtifact -Path $receiptPath -Value $receipt
 [pscustomobject]@{
     run_id = $RunId
     session_root = $sessionRoot
-    execution_plan_path = $planPath
+    execution_plan_path = $publishedPlanPath
+    primary_plan_path = $primaryPlanPath
+    legacy_execution_plan_path = if ($legacyDocumentationWrite) { $planPath } else { $null }
     module_work_plan_path = $moduleWorkPlanPath
     receipt_path = $receiptPath
     receipt = $receipt
+    artifact_contract = $artifactContract
+    plan_artifact_path = [string]$artifactContract.paths.plan
+    artifact_manifest_path = [string]$artifactContract.paths.manifest
 }

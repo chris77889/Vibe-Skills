@@ -249,7 +249,12 @@ def dedupe_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def load_workspace_memory_policy_bundle(repo_root: Path) -> dict[str, Any]:
     config_root = repo_root / "config"
     bundle: dict[str, Any] = {}
-    for name in ("memory-ingest-policy", "memory-disclosure-policy", "workspace-memory-plane"):
+    for name in (
+        "memory-ingest-policy",
+        "memory-disclosure-policy",
+        "workspace-memory-plane",
+        "live-document-contract",
+    ):
         path = config_root / f"{name}.json"
         bundle[name.replace("-", "_")] = load_json(path) if path.exists() else {}
     return bundle
@@ -259,8 +264,48 @@ def _normalize_identity_input(value: str) -> str:
     return value.replace("\\", "/").rstrip("/").lower()
 
 
+def _relative_runtime_contract(
+    repo_root: Path,
+    policy_bundle: dict[str, Any] | None,
+) -> dict[str, Any]:
+    contract = dict((policy_bundle or {}).get("live_document_contract") or {})
+    contract_path = repo_root / "config" / "live-document-contract.json"
+    if not contract and contract_path.is_file():
+        contract = load_json(contract_path)
+    if not contract:
+        return {"session_root": "outputs/runtime/vibe-sessions"}
+    sink = contract.get("artifact_sink")
+    if not isinstance(sink, dict):
+        raise ValueError("live document contract must define artifact_sink")
+    required_fields = (
+        "root",
+        "artifact_paths",
+        "primary_document_paths",
+        "manifest_path",
+        "legacy_compatibility_path",
+        "legacy_documentation_roots",
+        "legacy_removal_release",
+        "legacy_write_mode",
+    )
+    missing = [field for field in required_fields if field not in sink]
+    if missing:
+        raise ValueError(
+            "artifact sink is missing descriptor fields: " + ", ".join(missing)
+        )
+    return {
+        "artifact_sink_root": str(sink["root"]),
+        "artifact_paths": dict(sink["artifact_paths"]),
+        "primary_document_paths": dict(sink["primary_document_paths"]),
+        "manifest_path": str(sink["manifest_path"]),
+        "legacy_compatibility_path": str(sink["legacy_compatibility_path"]),
+        "session_root": "outputs/runtime/vibe-sessions",
+        "legacy_documentation_roots": list(sink["legacy_documentation_roots"]),
+        "legacy_removal_release": str(sink["legacy_removal_release"]),
+        "legacy_write_mode": str(sink["legacy_write_mode"]),
+    }
+
+
 def ensure_workspace_descriptor(repo_root: Path, policy_bundle: dict[str, Any] | None = None) -> dict[str, Any]:
-    del policy_bundle
     workspace_root = repo_root.resolve()
     sidecar_root = workspace_root / ".vibeskills"
     descriptor_path = sidecar_root / "project.json"
@@ -275,11 +320,10 @@ def ensure_workspace_descriptor(repo_root: Path, policy_bundle: dict[str, Any] |
             "workspace_sidecar_root": str(sidecar_root),
             "project_descriptor_path": str(descriptor_path),
             "default_artifact_root": str(sidecar_root),
-            "relative_runtime_contract": {
-                "requirement_root": "docs/requirements",
-                "execution_plan_root": "docs/plans",
-                "session_root": "outputs/runtime/vibe-sessions",
-            },
+            "relative_runtime_contract": _relative_runtime_contract(
+                workspace_root,
+                policy_bundle,
+            ),
             "host_sidecar_root": None,
         }
     descriptor["workspace_root"] = str(Path(str(descriptor.get("workspace_root") or workspace_root)).resolve())
@@ -288,11 +332,10 @@ def ensure_workspace_descriptor(repo_root: Path, policy_bundle: dict[str, Any] |
     descriptor["default_artifact_root"] = str(
         Path(str(descriptor.get("default_artifact_root") or descriptor["workspace_sidecar_root"])).resolve()
     )
-    descriptor["relative_runtime_contract"] = {
-        "requirement_root": "docs/requirements",
-        "execution_plan_root": "docs/plans",
-        "session_root": "outputs/runtime/vibe-sessions",
-    }
+    descriptor["relative_runtime_contract"] = _relative_runtime_contract(
+        workspace_root,
+        policy_bundle,
+    )
     descriptor["memory_plane"] = {
         "identity_root": descriptor["project_descriptor_path"],
         "identity_scope": WORKSPACE_MEMORY_IDENTITY_SCOPE,

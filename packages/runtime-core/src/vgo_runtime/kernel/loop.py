@@ -15,6 +15,12 @@ from .task_card import TaskCard, TaskRevision, build_task_card
 from .verifier import verify_run
 from .module_assignments import ModuleAssignments, build_module_assignments
 from .work_plan import AcceptanceCriterion, SkillProvenance, WorkPlan, WorkUnit
+from vgo_runtime.artifact_contract import (
+    load_runtime_artifact_manifest,
+    mirror_legacy_run_if_needed,
+    resolve_runtime_artifact_projection,
+    write_runtime_artifact_bundle,
+)
 
 
 def _write_json(path: Path, payload: object) -> Path:
@@ -908,8 +914,13 @@ def run_local_kernel(
     resolved_agent_root = agent_root.resolve()
     resolved_workspace_root = workspace_root.resolve() if workspace_root is not None else None
     resolved_run_id = str(run_id or "run-default").strip() or "run-default"
-    vibe_root = resolved_agent_root / "vibe"
-    run_root = vibe_root / "runs" / resolved_run_id
+    artifact_projection = resolve_runtime_artifact_projection(
+        agent_root=resolved_agent_root,
+        workspace_root=resolved_workspace_root,
+        run_id=resolved_run_id,
+        repo_root=_repo_root(),
+    )
+    run_root = artifact_projection.run_root
     task_card_path = run_root / "task-card.json"
     plan_path = run_root / "plan.json"
     work_results_path = run_root / "work-results.json"
@@ -1172,6 +1183,36 @@ def run_local_kernel(
         _render_work_dossier_markdown(work_dossier_payload),
         encoding="utf-8",
     )
+    artifact_manifest = write_runtime_artifact_bundle(
+        artifact_projection,
+        requirement=task_card_payload,
+        plan=work_plan_payload,
+        status=run_state.model_dump(),
+        proof=work_dossier_payload,
+        repo_root=_repo_root(),
+        host_id=host_id,
+        legacy_writes=(
+            [str(artifact_projection.legacy_run_root)]
+            if artifact_projection.legacy_projection_enabled
+            else []
+        ),
+    )
+    mirror_legacy_run_if_needed(artifact_projection)
+    canonical_artifact_paths = {
+        "requirement": str(artifact_projection.artifact_paths["requirement"]),
+        "plan": str(artifact_projection.artifact_paths["plan"]),
+        "status": str(artifact_projection.artifact_paths["status"]),
+        "proof": str(artifact_projection.artifact_paths["proof"]),
+        "primary_requirement": str(
+            artifact_projection.primary_document_paths["requirement"]
+        ),
+        "primary_plan": str(artifact_projection.primary_document_paths["plan"]),
+        "artifact_manifest": str(artifact_projection.manifest_path),
+        "legacy_compatibility": str(
+            artifact_projection.artifact_paths["legacy_compatibility"]
+        ),
+    }
+    artifacts.update(canonical_artifact_paths)
     work_summary = {
         "run_id": resolved_run_id,
         "task_id": task_card.id,
@@ -1213,6 +1254,12 @@ def run_local_kernel(
         "run_state_path": str(run_root / "run-state.json"),
         "verification": verification_payload,
         "verification_path": str(verification_path),
+        "artifact_manifest": artifact_manifest.model_dump(),
+        "artifact_manifest_path": str(artifact_projection.manifest_path),
+        "artifact_root": str(artifact_projection.run_root),
+        "legacy_run_root": str(artifact_projection.legacy_run_root)
+        if artifact_projection.legacy_projection_enabled
+        else None,
         "candidate_count": len(candidates),
         "completed_work_units": list(completed_work_units),
         "failed_work_units": list(failed_work_units),
@@ -1234,7 +1281,39 @@ def inspect_local_run(
     if not resolved_run_id:
         raise ValueError("run_id must be a non-empty string")
 
-    run_root = resolved_agent_root / "vibe" / "runs" / resolved_run_id
+    projection = resolve_runtime_artifact_projection(
+        agent_root=resolved_agent_root,
+        workspace_root=workspace_root.resolve() if workspace_root is not None else None,
+        run_id=resolved_run_id,
+        repo_root=_repo_root(),
+    )
+    run_root = projection.run_root
+    requested_run_root = run_root
+    artifact_resolution_mode = "canonical"
+    if not (run_root / "work-dossier.json").is_file() and projection.legacy_run_root.is_dir():
+        # Read-only compatibility for runs created before the shared contract.
+        run_root = projection.legacy_run_root
+        artifact_resolution_mode = "legacy_projection"
+    if (
+        workspace_root is None
+        and not (run_root / "work-dossier.json").is_file()
+    ):
+        # An older caller may have omitted workspace_root even though the run
+        # was written to a sibling workspace. Discover only the bounded run
+        # sink shape; no historical documentation path is consulted.
+        sibling_candidates = sorted(
+            {
+                candidate
+                for candidate in resolved_agent_root.parent.glob(
+                    f"*/.vibeskills/runs/{resolved_run_id}"
+                )
+                if candidate.is_dir()
+            },
+            key=lambda candidate: str(candidate),
+        )
+        if sibling_candidates:
+            run_root = sibling_candidates[0]
+            artifact_resolution_mode = "sibling_contract_sink"
     skills_catalog_path = run_root / "skills-catalog.json"
     task_card_path = run_root / "task-card.json"
     plan_path = run_root / "plan.json"
@@ -1267,6 +1346,36 @@ def inspect_local_run(
         host_id=host_id,
         workspace_root=workspace_root,
     )
+    inspected_artifact_paths = {
+        kind: (run_root / relative_path).resolve()
+        for kind, relative_path in projection.artifact_sink.artifact_paths
+    }
+    inspected_primary_document_paths = {
+        kind: (run_root / relative_path).resolve()
+        for kind, relative_path in projection.artifact_sink.primary_document_paths
+    }
+    inspected_manifest_path = (
+        run_root / projection.artifact_sink.manifest_path
+    ).resolve()
+    manifest_payload: dict[str, object] | None = None
+    if inspected_manifest_path.is_file():
+        manifest_payload = load_runtime_artifact_manifest(
+            projection,
+            path=inspected_manifest_path,
+        )
+    compatibility_read = artifact_resolution_mode != "canonical"
+    artifact_resolution = {
+        "mode": artifact_resolution_mode,
+        "compatibility_read": compatibility_read,
+        "requested_root": str(requested_run_root),
+        "resolved_root": str(run_root),
+        "legacy_removal_release": (
+            projection.artifact_sink.legacy_removal_release
+            if compatibility_read
+            else None
+        ),
+        "observable": True,
+    }
     summary = {
         "run_id": resolved_run_id,
         "task_id": run_state.task_id,
@@ -1283,6 +1392,7 @@ def inspect_local_run(
         "proof_ready": verification_result == "done",
         "primary_artifact": "work_dossier",
         "primary_artifact_path": str(work_dossier_path),
+        "artifact_resolution": artifact_resolution,
     }
     return {
         "run_id": resolved_run_id,
@@ -1299,7 +1409,16 @@ def inspect_local_run(
             "work_results": str(work_results_path),
             "run_state": str(run_state_path),
             "verification": str(verification_path),
+            "requirement": str(inspected_artifact_paths["requirement"]),
+            "status": str(inspected_artifact_paths["status"]),
+            "proof": str(inspected_artifact_paths["proof"]),
+            "primary_requirement": str(
+                inspected_primary_document_paths["requirement"]
+            ),
+            "primary_plan": str(inspected_primary_document_paths["plan"]),
+            "artifact_manifest": str(inspected_manifest_path),
         },
+        "artifact_resolution": artifact_resolution,
         "skills_catalog": skills_catalog,
         "task_card": task_card,
         "work_plan": plan,
@@ -1309,6 +1428,7 @@ def inspect_local_run(
         "run_state": run_state.model_dump(),
         "verification": verification,
         "host_context": host_context,
+        "artifact_manifest": manifest_payload,
     }
 
 

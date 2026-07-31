@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 import sys
 import uuid
@@ -284,6 +285,14 @@ enabled: true
     assert result["artifacts"]["module_assignments"].endswith("module-assignments.json")
     assert result["artifacts"]["work_results"].endswith("work-results.json")
     assert result["artifacts"]["verification"].endswith("verification.json")
+    assert Path(result["artifacts"]["primary_requirement"]) == (
+        agent_root / ".vibeskills" / "runs" / "run-123" / "requirement.md"
+    ).resolve()
+    assert Path(result["artifacts"]["primary_plan"]) == (
+        agent_root / ".vibeskills" / "runs" / "run-123" / "plan.md"
+    ).resolve()
+    assert Path(result["artifacts"]["primary_requirement"]).is_file()
+    assert Path(result["artifacts"]["primary_plan"]).is_file()
     assert result["work_summary"]["proof_ready"] is False
     assert result["work_summary"]["work_unit_count"] == 1
     assert result["work_summary"]["primary_artifact"] == "work_dossier"
@@ -473,6 +482,59 @@ enabled: true
     assert inspected["artifacts"]["verification"].endswith("verification.json")
     assert inspected["artifacts"]["module_assignments"].endswith("module-assignments.json")
     assert inspected["artifacts"]["work_results"].endswith("work-results.json")
+    assert inspected["artifact_resolution"] == {
+        "mode": "canonical",
+        "compatibility_read": False,
+        "requested_root": str(agent_root / ".vibeskills" / "runs" / "run-123"),
+        "resolved_root": str(agent_root / ".vibeskills" / "runs" / "run-123"),
+        "legacy_removal_release": None,
+        "observable": True,
+    }
+
+
+def test_inspect_local_run_reads_the_observable_legacy_projection(
+    tmp_path: Path,
+) -> None:
+    agent_root = tmp_path / "agent-root"
+    result = run_local_kernel(
+        agent_root=agent_root,
+        prompt="Record one compatibility artifact.",
+        context={
+            "deliverables": ["compatibility artifact"],
+            "completion_criteria": ["compatibility artifact exists"],
+        },
+        run_id="legacy-projection",
+        execute=False,
+    )
+    canonical_root = Path(str(result["artifact_root"]))
+    legacy_root = Path(str(result["legacy_run_root"]))
+    assert canonical_root.is_dir()
+    assert legacy_root.is_dir()
+    shutil.rmtree(canonical_root)
+
+    inspected = inspect_local_run(
+        agent_root=agent_root,
+        run_id="legacy-projection",
+    )
+
+    assert inspected["artifact_manifest"] is not None
+    assert Path(inspected["artifacts"]["artifact_manifest"]) == (
+        legacy_root / "manifest.json"
+    )
+    assert Path(inspected["artifacts"]["requirement"]) == (
+        legacy_root / "requirement.json"
+    )
+    assert inspected["artifact_manifest"]["legacy_compatibility"]["writes"] == [
+        str(legacy_root)
+    ]
+    assert inspected["artifact_resolution"] == {
+        "mode": "legacy_projection",
+        "compatibility_read": True,
+        "requested_root": str(canonical_root),
+        "resolved_root": str(legacy_root),
+        "legacy_removal_release": "4.1.0",
+        "observable": True,
+    }
 
 
 def test_run_local_kernel_writes_host_aware_skills_catalog_artifact(tmp_path: Path) -> None:
@@ -874,6 +936,12 @@ enabled: true
 
     inspected = inspect_local_run(agent_root=agent_root, run_id="inspect-host-aware-run")
 
+    assert inspected["artifact_resolution"]["mode"] == "sibling_contract_sink"
+    assert inspected["artifact_resolution"]["compatibility_read"] is True
+    assert inspected["artifact_resolution"]["legacy_removal_release"] == "4.1.0"
+    assert Path(inspected["artifact_resolution"]["resolved_root"]) == (
+        workspace_root / ".vibeskills" / "runs" / "inspect-host-aware-run"
+    ).resolve()
     assert inspected["artifacts"]["skills_catalog"].endswith("skills-catalog.json")
     assert Path(inspected["artifacts"]["skills_catalog"]).is_file()
     unit = inspected["module_assignments"]["units"][0]

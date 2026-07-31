@@ -26,6 +26,7 @@ from .governance_runtime_roles import RUNTIME_PAYLOAD_ROLE_NOTES, derive_runtime
 from .host_launch_receipt import HostLaunchReceipt, write_host_launch_receipt
 from .install_ledger import InstallLedger
 from .live_governance_contract import (
+    ALLOWED_LEGACY_WRITE_MODES,
     LIVE_GOVERNANCE_CONTRACT_RELPATH,
     MAX_LIVE_MARKDOWN_DOCUMENTS,
     ArtifactSinkContract,
@@ -94,6 +95,7 @@ __all__ = [
     'write_host_launch_receipt',
     'InstallLedger',
     'LIVE_GOVERNANCE_CONTRACT_RELPATH',
+    'ALLOWED_LEGACY_WRITE_MODES',
     'MAX_LIVE_MARKDOWN_DOCUMENTS',
     'ArtifactSinkContract',
     'LiveDocumentEntry',
