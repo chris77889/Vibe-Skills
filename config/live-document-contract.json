@@ -1,0 +1,121 @@
+{
+  "schema_version": 1,
+  "max_live_documents": 30,
+  "governed_roots": [
+    ".",
+    "docs",
+    "references"
+  ],
+  "excluded_paths": [
+    "THIRD_PARTY_LICENSES.md"
+  ],
+  "excluded_prefixes": [
+    "references/provenance/"
+  ],
+  "documents": [
+    {
+      "id": "project-readme",
+      "path": "README.md",
+      "owner": "project-entry",
+      "lifecycle": "live"
+    },
+    {
+      "id": "project-readme-zh",
+      "path": "README.zh.md",
+      "owner": "project-entry",
+      "lifecycle": "live"
+    },
+    {
+      "id": "contributor-entry",
+      "path": "CONTRIBUTING.md",
+      "owner": "contributor-experience",
+      "lifecycle": "live"
+    },
+    {
+      "id": "verification-language",
+      "path": "CONTEXT.md",
+      "owner": "verification",
+      "lifecycle": "live"
+    },
+    {
+      "id": "docs-entry",
+      "path": "docs/README.md",
+      "owner": "project-entry",
+      "lifecycle": "live"
+    },
+    {
+      "id": "governance-entry",
+      "path": "docs/governance/README.md",
+      "owner": "governance",
+      "lifecycle": "live"
+    },
+    {
+      "id": "runtime-field-contract",
+      "path": "docs/governance/current-runtime-field-contract.md",
+      "owner": "runtime-contracts",
+      "lifecycle": "live"
+    },
+    {
+      "id": "routing-contract",
+      "path": "docs/governance/current-routing-contract.md",
+      "owner": "routing",
+      "lifecycle": "live"
+    },
+    {
+      "id": "skill-admission-contract",
+      "path": "docs/governance/skill-admission-hardening.md",
+      "owner": "skill-catalog",
+      "lifecycle": "live"
+    },
+    {
+      "id": "bundled-retention-contract",
+      "path": "docs/governance/bundled-skill-retention-matrix.md",
+      "owner": "skill-catalog",
+      "lifecycle": "live"
+    },
+    {
+      "id": "developer-change-contract",
+      "path": "docs/developer-change-governance.md",
+      "owner": "governance",
+      "lifecycle": "live"
+    },
+    {
+      "id": "governance-history-decision",
+      "path": "docs/adr/0001-externalize-governance-history.md",
+      "owner": "governance",
+      "lifecycle": "retained"
+    },
+    {
+      "id": "contributor-zone-contract",
+      "path": "references/contributor-zone-decision-table.md",
+      "owner": "contributor-experience",
+      "lifecycle": "live"
+    },
+    {
+      "id": "change-proof-contract",
+      "path": "references/change-proof-matrix.md",
+      "owner": "verification",
+      "lifecycle": "live"
+    },
+    {
+      "id": "developer-entry-contract",
+      "path": "references/developer-entry-contract.md",
+      "owner": "contributor-experience",
+      "lifecycle": "live"
+    }
+  ],
+  "artifact_sink": {
+    "schema_version": 1,
+    "root": ".vibeskills/runs",
+    "required_artifacts": [
+      "requirement",
+      "plan",
+      "status",
+      "proof"
+    ],
+    "required_metadata": [
+      "commit_sha",
+      "execution_environment"
+    ]
+  }
+}

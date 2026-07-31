@@ -24,6 +24,7 @@
     "config/gsd-overlay.json",
     "config/heartbeat-policy.json",
     "config/implementation-guardrails.json",
+    "config/live-document-contract.json",
     "config/llm-acceleration-policy.json",
     "config/memory-backend-adapters.json",
     "config/memory-disclosure-policy.json",
@@ -87,6 +88,7 @@
       "runtime_governance_files": [
         "config/fallback-governance.json",
         "config/implementation-guardrails.json",
+        "config/live-document-contract.json",
         "config/operator-preview-contract.json",
         "config/phase-cleanup-policy.json",
         "config/plan-execution-policy.json",
