@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 import sys
 import uuid
@@ -13,6 +14,7 @@ RUNTIME_SRC = REPO_ROOT / "packages" / "runtime-core" / "src"
 if str(RUNTIME_SRC) not in sys.path:
     sys.path.insert(0, str(RUNTIME_SRC))
 
+from vgo_runtime.artifact_contract import _copy_run_tree
 from vgo_runtime.kernel.executor import execute_work_unit
 from vgo_runtime.kernel.finder import find_skill_candidates
 from vgo_runtime.kernel.loop import inspect_local_run, inspect_main, run_local_kernel
@@ -20,6 +22,13 @@ from vgo_runtime.kernel.planner import build_work_plan
 from vgo_runtime.kernel.run_state import load_run_state, write_run_state
 from vgo_runtime.kernel.task_card import build_task_card
 from vgo_runtime.kernel.verifier import verify_run
+
+
+def _create_symlink_or_skip(link: Path, target: Path) -> None:
+    try:
+        link.symlink_to(target, target_is_directory=target.is_dir())
+    except (NotImplementedError, OSError) as exc:
+        pytest.skip(f"symlink creation is unavailable: {exc}")
 
 
 def run_local_kernel_with_agent_choice(**kwargs: object) -> dict[str, object]:
@@ -284,6 +293,14 @@ enabled: true
     assert result["artifacts"]["module_assignments"].endswith("module-assignments.json")
     assert result["artifacts"]["work_results"].endswith("work-results.json")
     assert result["artifacts"]["verification"].endswith("verification.json")
+    assert Path(result["artifacts"]["primary_requirement"]) == (
+        agent_root / ".vibeskills" / "runs" / "run-123" / "requirement.md"
+    ).resolve()
+    assert Path(result["artifacts"]["primary_plan"]) == (
+        agent_root / ".vibeskills" / "runs" / "run-123" / "plan.md"
+    ).resolve()
+    assert Path(result["artifacts"]["primary_requirement"]).is_file()
+    assert Path(result["artifacts"]["primary_plan"]).is_file()
     assert result["work_summary"]["proof_ready"] is False
     assert result["work_summary"]["work_unit_count"] == 1
     assert result["work_summary"]["primary_artifact"] == "work_dossier"
@@ -473,6 +490,218 @@ enabled: true
     assert inspected["artifacts"]["verification"].endswith("verification.json")
     assert inspected["artifacts"]["module_assignments"].endswith("module-assignments.json")
     assert inspected["artifacts"]["work_results"].endswith("work-results.json")
+    assert inspected["artifact_resolution"] == {
+        "mode": "canonical",
+        "compatibility_read": False,
+        "requested_root": str(agent_root / ".vibeskills" / "runs" / "run-123"),
+        "resolved_root": str(agent_root / ".vibeskills" / "runs" / "run-123"),
+        "legacy_removal_release": None,
+        "observable": True,
+    }
+
+
+def test_inspect_local_run_reads_the_observable_legacy_projection(
+    tmp_path: Path,
+) -> None:
+    agent_root = tmp_path / "agent-root"
+    result = run_local_kernel(
+        agent_root=agent_root,
+        prompt="Record one compatibility artifact.",
+        context={
+            "deliverables": ["compatibility artifact"],
+            "completion_criteria": ["compatibility artifact exists"],
+        },
+        run_id="legacy-projection",
+        execute=False,
+    )
+    canonical_root = Path(str(result["artifact_root"]))
+    legacy_root = Path(str(result["legacy_run_root"]))
+    assert canonical_root.is_dir()
+    assert legacy_root.is_dir()
+    shutil.rmtree(canonical_root)
+
+    inspected = inspect_local_run(
+        agent_root=agent_root,
+        run_id="legacy-projection",
+    )
+
+    assert inspected["artifact_manifest"] is not None
+    assert Path(inspected["artifacts"]["artifact_manifest"]) == (
+        legacy_root / "manifest.json"
+    )
+    assert Path(inspected["artifacts"]["requirement"]) == (
+        legacy_root / "requirement.json"
+    )
+    assert inspected["artifact_manifest"]["legacy_compatibility"]["writes"] == [
+        str(legacy_root)
+    ]
+    assert inspected["artifact_resolution"] == {
+        "mode": "legacy_projection",
+        "compatibility_read": True,
+        "requested_root": str(canonical_root),
+        "resolved_root": str(legacy_root),
+        "legacy_removal_release": "4.1.0",
+        "observable": True,
+    }
+
+
+def test_run_local_kernel_resumes_a_legacy_projection_in_the_canonical_sink(
+    tmp_path: Path,
+) -> None:
+    agent_root = tmp_path / "agent-root"
+    first = run_local_kernel(
+        agent_root=agent_root,
+        prompt="Review the runtime redesign and produce review notes.",
+        run_id="legacy-resume",
+        execute=False,
+    )
+    canonical_root = Path(str(first["artifact_root"]))
+    legacy_root = Path(str(first["legacy_run_root"]))
+    shutil.rmtree(canonical_root)
+
+    resumed = run_local_kernel(
+        agent_root=agent_root,
+        prompt="Continue by adding focused tests and verification evidence.",
+        run_id="legacy-resume",
+        execute=False,
+    )
+
+    assert resumed["task_card"]["goal"] == first["task_card"]["goal"]
+    assert resumed["task_card"]["initial_goal"] == first["task_card"]["initial_goal"]
+    assert resumed["work_summary"]["continuation_mode"] == "revised"
+    assert resumed["work_summary"]["accepted_revision_count"] == 1
+    assert canonical_root.is_dir()
+    assert json.loads((canonical_root / "task-card.json").read_text(encoding="utf-8")) == json.loads(
+        (legacy_root / "task-card.json").read_text(encoding="utf-8")
+    )
+
+
+def test_run_local_kernel_rejects_a_symlinked_legacy_run_root(
+    tmp_path: Path,
+) -> None:
+    agent_root = tmp_path / "agent-root"
+    external_root = tmp_path / "external-run"
+    external_root.mkdir()
+    legacy_runs_root = agent_root / "vibe" / "runs"
+    legacy_runs_root.mkdir(parents=True)
+    _create_symlink_or_skip(legacy_runs_root / "linked-run", external_root)
+
+    with pytest.raises(ValueError, match="legacy run path must not contain symlinks"):
+        run_local_kernel(
+            agent_root=agent_root,
+            prompt="Do not follow the legacy run link.",
+            run_id="linked-run",
+            execute=False,
+        )
+
+    assert not (external_root / "task-card.json").exists()
+
+
+def test_run_local_kernel_rejects_symlinked_files_inside_a_legacy_run(
+    tmp_path: Path,
+) -> None:
+    agent_root = tmp_path / "agent-root"
+    legacy_run_root = agent_root / "vibe" / "runs" / "linked-file-run"
+    legacy_run_root.mkdir(parents=True)
+    external_file = tmp_path / "external.txt"
+    external_file.write_text("external", encoding="utf-8")
+    _create_symlink_or_skip(legacy_run_root / "linked.txt", external_file)
+
+    with pytest.raises(ValueError, match="run artifact trees must not contain symlinks"):
+        run_local_kernel(
+            agent_root=agent_root,
+            prompt="Do not copy linked legacy files.",
+            run_id="linked-file-run",
+            execute=False,
+        )
+
+    canonical_root = agent_root / ".vibeskills" / "runs" / "linked-file-run"
+    assert not (canonical_root / "linked.txt").exists()
+
+
+def test_copy_run_tree_rechecks_destination_components_after_directory_creation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_root = tmp_path / "source"
+    source_file = source_root / "nested" / "artifact.json"
+    source_file.parent.mkdir(parents=True)
+    source_file.write_text("source", encoding="utf-8")
+    destination_root = tmp_path / "destination"
+    external_root = tmp_path / "external"
+    external_root.mkdir()
+    destination_parent = destination_root / "nested"
+    original_mkdir = Path.mkdir
+
+    def mkdir_then_replace_with_symlink(
+        path: Path,
+        mode: int = 0o777,
+        parents: bool = False,
+        exist_ok: bool = False,
+    ) -> None:
+        original_mkdir(path, mode=mode, parents=parents, exist_ok=exist_ok)
+        if path != destination_parent:
+            return
+        path.rmdir()
+        _create_symlink_or_skip(path, external_root)
+
+    monkeypatch.setattr(Path, "mkdir", mkdir_then_replace_with_symlink)
+
+    with pytest.raises(ValueError, match="run artifact copy path must not contain symlinks"):
+        _copy_run_tree(
+            source_root=source_root,
+            destination_root=destination_root,
+        )
+
+    assert not (external_root / "artifact.json").exists()
+
+
+def test_inspect_local_run_does_not_use_legacy_fallback_for_explicit_workspace(
+    tmp_path: Path,
+) -> None:
+    agent_root = tmp_path / "agent-root"
+    result = run_local_kernel(
+        agent_root=agent_root,
+        prompt="Record one compatibility artifact.",
+        run_id="workspace-isolated-legacy-run",
+        execute=False,
+    )
+    shutil.rmtree(Path(str(result["artifact_root"])))
+    explicit_workspace = tmp_path / "other-workspace"
+
+    with pytest.raises(ValueError, match="missing run artifact") as exc_info:
+        inspect_local_run(
+            agent_root=agent_root,
+            run_id="workspace-isolated-legacy-run",
+            workspace_root=explicit_workspace,
+        )
+
+    assert str(explicit_workspace.resolve()) in str(exc_info.value)
+
+
+def test_inspect_local_run_rejects_ambiguous_sibling_workspace_runs(
+    tmp_path: Path,
+) -> None:
+    agent_root = tmp_path / "agent-root"
+    workspace_a = tmp_path / "workspace-a"
+    workspace_b = tmp_path / "workspace-b"
+    for workspace in (workspace_a, workspace_b):
+        run_local_kernel(
+            agent_root=agent_root,
+            workspace_root=workspace,
+            prompt=f"Record the run for {workspace.name}.",
+            run_id="ambiguous-sibling-run",
+            execute=False,
+        )
+
+    with pytest.raises(ValueError, match="several workspace run sinks") as exc_info:
+        inspect_local_run(
+            agent_root=agent_root,
+            run_id="ambiguous-sibling-run",
+        )
+
+    assert str(workspace_a.resolve()) in str(exc_info.value)
+    assert str(workspace_b.resolve()) in str(exc_info.value)
 
 
 def test_run_local_kernel_writes_host_aware_skills_catalog_artifact(tmp_path: Path) -> None:
@@ -874,6 +1103,12 @@ enabled: true
 
     inspected = inspect_local_run(agent_root=agent_root, run_id="inspect-host-aware-run")
 
+    assert inspected["artifact_resolution"]["mode"] == "sibling_contract_sink"
+    assert inspected["artifact_resolution"]["compatibility_read"] is True
+    assert inspected["artifact_resolution"]["legacy_removal_release"] == "4.1.0"
+    assert Path(inspected["artifact_resolution"]["resolved_root"]) == (
+        workspace_root / ".vibeskills" / "runs" / "inspect-host-aware-run"
+    ).resolve()
     assert inspected["artifacts"]["skills_catalog"].endswith("skills-catalog.json")
     assert Path(inspected["artifacts"]["skills_catalog"]).is_file()
     unit = inspected["module_assignments"]["units"][0]

@@ -6,6 +6,7 @@
     [string]$RuntimeInputPacketPath = '',
     [string]$MemoryContextPath = '',
     [string]$ArtifactRoot = '',
+    [AllowEmptyString()] [string]$WorkspaceRoot = '',
     [AllowEmptyString()] [string]$GovernanceScope = '',
     [AllowEmptyString()] [string]$RootRunId = '',
     [AllowEmptyString()] [string]$ParentRunId = '',
@@ -132,6 +133,7 @@ if ([string]::IsNullOrWhiteSpace($RunId)) {
     $RunId = New-VibeRunId
 }
 
+$artifactContract = Get-VibeArtifactContractDescriptor -RepoRoot $runtime.repo_root -RunId $RunId -WorkspaceRoot $WorkspaceRoot -ArtifactRoot $ArtifactRoot
 $sessionRoot = Ensure-VibeSessionRoot -RepoRoot $runtime.repo_root -RunId $RunId -Runtime $runtime -ArtifactRoot $ArtifactRoot
 $hierarchyState = Get-VibeHierarchyState `
     -GovernanceScope $GovernanceScope `
@@ -157,8 +159,22 @@ $docPath = if ($isChildScope) {
     }
     [string]$hierarchyState.inherited_requirement_doc_path
 } else {
-    Get-VibeRequirementDocPath -RepoRoot $runtime.repo_root -Task $Task -ArtifactRoot $ArtifactRoot
+    Get-VibeRequirementDocPath `
+        -RepoRoot $runtime.repo_root `
+        -Task $Task `
+        -ArtifactRoot $ArtifactRoot `
+        -WorkspaceRoot $WorkspaceRoot
 }
+$primaryRequirementPath = if ($isChildScope) {
+    $docPath
+} else {
+    [string]$artifactContract.paths.primary_requirement
+}
+$legacyDocumentationWrite = [bool](
+    -not $isChildScope -and
+    [string]$artifactContract.legacy_write_mode -eq 'dual_write'
+)
+$publishedRequirementPath = $primaryRequirementPath
 $antiDriftDraft = New-VgoAntiProxyGoalDriftDraft -PrimaryObjective $intentContract.goal
 $productAcceptanceCriteria = Get-VibeProductAcceptanceCriteria -IntentContract $intentContract
 $completionLanguagePolicy = Get-VibeCompletionLanguagePolicy
@@ -400,7 +416,10 @@ if ($isChildScope) {
     )
     Write-VibeMarkdownArtifact -Path $childHandoffPath -Lines $handoffLines
 } else {
-    Write-VibeMarkdownArtifact -Path $docPath -Lines $lines
+    Write-VibeMarkdownArtifact -Path $primaryRequirementPath -Lines $lines
+    if ($legacyDocumentationWrite) {
+        Write-VibeMarkdownArtifact -Path $docPath -Lines $lines
+    }
 }
 
 $receipt = [pscustomobject]@{
@@ -408,7 +427,9 @@ $receipt = [pscustomobject]@{
     run_id = $RunId
     governance_scope = [string]$hierarchyState.governance_scope
     mode = $Mode
-    requirement_doc_path = $docPath
+    requirement_doc_path = $publishedRequirementPath
+    primary_requirement_path = $primaryRequirementPath
+    legacy_requirement_doc_path = if ($legacyDocumentationWrite) { $docPath } else { $null }
     child_requirement_handoff_path = $childHandoffPath
     canonical_write_allowed = -not $isChildScope
     inherited_requirement_doc_path = if ($isChildScope) { $docPath } else { $null }
@@ -420,6 +441,14 @@ $receipt = [pscustomobject]@{
     memory_disclosure_level = if ($memoryContextPack -and $memoryContextPack.PSObject.Properties.Name -contains 'disclosure_level') { [string]$memoryContextPack.disclosure_level } else { $null }
     memory_capsule_count = @($selectedMemoryCapsules).Count
     generated_at = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+    artifact_contract = [pscustomobject]@{
+        artifact_root = [string]$artifactContract.artifact_root
+        requirement = [string]$artifactContract.paths.requirement
+        manifest = [string]$artifactContract.paths.manifest
+        legacy_documentation_write = $legacyDocumentationWrite
+        legacy_write_mode = [string]$artifactContract.legacy_write_mode
+        legacy_removal_release = [string]$artifactContract.legacy_removal_release
+    }
 }
 $receiptPath = Join-Path $sessionRoot 'requirement-doc-receipt.json'
 Write-VibeJsonArtifact -Path $receiptPath -Value $receipt
@@ -427,7 +456,12 @@ Write-VibeJsonArtifact -Path $receiptPath -Value $receipt
 [pscustomobject]@{
     run_id = $RunId
     session_root = $sessionRoot
-    requirement_doc_path = $docPath
+    requirement_doc_path = $publishedRequirementPath
+    primary_requirement_path = $primaryRequirementPath
+    legacy_requirement_doc_path = if ($legacyDocumentationWrite) { $docPath } else { $null }
     receipt_path = $receiptPath
     receipt = $receipt
+    artifact_contract = $artifactContract
+    requirement_artifact_path = [string]$artifactContract.paths.requirement
+    artifact_manifest_path = [string]$artifactContract.paths.manifest
 }

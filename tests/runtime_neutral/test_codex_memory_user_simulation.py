@@ -357,7 +357,13 @@ def complete_module_execution(
         check=True,
         timeout=RUNTIME_INVOCATION_TIMEOUT_SECONDS,
     )
-    return json.loads(completed.stdout.strip())
+    stdout = completed.stdout.strip()
+    if stdout in ("", "null"):
+        raise AssertionError(
+            "module execution re-entry returned null payload. "
+            f"stderr={completed.stderr.strip()}"
+        )
+    return json.loads(stdout)
 
 
 def run_repo_governed_runtime(

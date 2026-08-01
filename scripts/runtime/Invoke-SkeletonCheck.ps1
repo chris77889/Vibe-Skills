@@ -2,7 +2,8 @@ param(
     [Parameter(Mandatory)] [string]$Task,
     [string]$Mode = 'interactive_governed',
     [string]$RunId = '',
-    [string]$ArtifactRoot = ''
+    [string]$ArtifactRoot = '',
+    [AllowEmptyString()] [string]$WorkspaceRoot = ''
 )
 
 Set-StrictMode -Version Latest
@@ -15,8 +16,11 @@ if ([string]::IsNullOrWhiteSpace($RunId)) {
     $RunId = New-VibeRunId
 }
 
+$artifactContract = Get-VibeArtifactContractDescriptor -RepoRoot $runtime.repo_root -RunId $RunId -WorkspaceRoot $WorkspaceRoot -ArtifactRoot $ArtifactRoot
 $sessionRoot = Ensure-VibeSessionRoot -RepoRoot $runtime.repo_root -RunId $RunId -Runtime $runtime -ArtifactRoot $ArtifactRoot
-$artifactBaseRoot = Get-VibeArtifactRoot -RepoRoot $runtime.repo_root -Runtime $runtime -ArtifactRoot $ArtifactRoot
+$separator = [string][System.IO.Path]::DirectorySeparatorChar
+$legacyRequirementRoot = Join-Path ([string]$artifactContract.workspace_root) ([string]$artifactContract.legacy_documentation_paths.requirement).Replace('/', $separator)
+$legacyPlanRoot = Join-Path ([string]$artifactContract.workspace_root) ([string]$artifactContract.legacy_documentation_paths.plan).Replace('/', $separator)
 $requiredPaths = @(
     'SKILL.md',
     'protocols/runtime.md',
@@ -62,13 +66,13 @@ $receipt = [pscustomobject]@{
     git_status = @($gitStatus)
     required_paths = @($pathChecks)
     existing_requirement_docs = @(
-        if (Test-Path -LiteralPath (Join-Path $artifactBaseRoot 'docs\requirements')) {
-            Get-ChildItem -LiteralPath (Join-Path $artifactBaseRoot 'docs\requirements') -Filter *.md -File | Select-Object -ExpandProperty Name
+        if (Test-Path -LiteralPath $legacyRequirementRoot) {
+            Get-ChildItem -LiteralPath $legacyRequirementRoot -Filter *.md -File | Select-Object -ExpandProperty Name
         }
     )
     existing_plan_docs = @(
-        if (Test-Path -LiteralPath (Join-Path $artifactBaseRoot 'docs\plans')) {
-            Get-ChildItem -LiteralPath (Join-Path $artifactBaseRoot 'docs\plans') -Filter *.md -File | Select-Object -ExpandProperty Name
+        if (Test-Path -LiteralPath $legacyPlanRoot) {
+            Get-ChildItem -LiteralPath $legacyPlanRoot -Filter *.md -File | Select-Object -ExpandProperty Name
         }
     )
 }

@@ -19,11 +19,17 @@ REQUIRED_ARTIFACT_METADATA: tuple[str, ...] = (
     "commit_sha",
     "execution_environment",
 )
+REQUIRED_PRIMARY_DOCUMENT_KINDS: tuple[str, ...] = (
+    "requirement",
+    "plan",
+)
+ALLOWED_LEGACY_WRITE_MODES = frozenset({"disabled", "dual_write", "explicit"})
 REQUIRED_GOVERNED_ROOTS = frozenset({".", "docs", "references"})
 ALLOWED_DOCUMENT_LIFECYCLES = frozenset({"live", "transitional", "retained"})
 
 _SLUG_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
 _WINDOWS_DRIVE_PATTERN = re.compile(r"^[A-Za-z]:")
+_RUN_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 
 def _normalize_relative_path(value: Any, field_name: str, *, allow_dot: bool = False) -> str:
@@ -58,6 +64,13 @@ def _normalize_unique_strings(values: Any, field_name: str) -> tuple[str, ...]:
         raise ValueError(f"{field_name} must not contain empty values")
     if len(set(normalized)) != len(normalized):
         raise ValueError(f"{field_name} must not contain duplicates")
+    return normalized
+
+
+def _normalize_run_id(value: Any, field_name: str = "run_id") -> str:
+    normalized = str(value or "").strip()
+    if not _RUN_ID_PATTERN.fullmatch(normalized):
+        raise ValueError(f"{field_name} must be a safe path segment")
     return normalized
 
 
@@ -98,6 +111,13 @@ class ArtifactSinkContract:
     root: str
     required_artifacts: tuple[str, ...]
     required_metadata: tuple[str, ...]
+    artifact_paths: tuple[tuple[str, str], ...]
+    primary_document_paths: tuple[tuple[str, str], ...]
+    manifest_path: str
+    legacy_compatibility_path: str
+    legacy_documentation_roots: tuple[str, ...]
+    legacy_removal_release: str
+    legacy_write_mode: str
 
     @classmethod
     def model_validate(cls, payload: dict[str, Any]) -> "ArtifactSinkContract":
@@ -114,6 +134,12 @@ class ArtifactSinkContract:
                 "artifact sink is missing required artifact kinds: "
                 + ", ".join(sorted(missing_artifacts))
             )
+        extra_artifacts = set(required_artifacts) - set(REQUIRED_ARTIFACT_KINDS)
+        if extra_artifacts:
+            raise ValueError(
+                "artifact sink contains unsupported artifact kinds: "
+                + ", ".join(sorted(extra_artifacts))
+            )
         required_metadata = _normalize_unique_strings(
             payload.get("required_metadata"),
             "artifact sink required_metadata",
@@ -124,12 +150,193 @@ class ArtifactSinkContract:
                 "artifact sink is missing required metadata: "
                 + ", ".join(sorted(missing_metadata))
             )
+        raw_artifact_paths = payload.get("artifact_paths")
+        if isinstance(raw_artifact_paths, dict):
+            artifact_paths = tuple(
+                (
+                    str(kind).strip(),
+                    _normalize_relative_path(path, f"artifact path for {kind}"),
+                )
+                for kind, path in raw_artifact_paths.items()
+            )
+        else:
+            raise ValueError("artifact sink artifact_paths must be an object")
+        artifact_path_kinds = [kind for kind, _ in artifact_paths]
+        if any(not kind for kind in artifact_path_kinds):
+            raise ValueError("artifact sink artifact_paths must use non-empty kinds")
+        if len(set(artifact_path_kinds)) != len(artifact_path_kinds):
+            raise ValueError("artifact sink artifact_paths must use unique kinds")
+        missing_path_kinds = set(required_artifacts) - set(artifact_path_kinds)
+        if missing_path_kinds:
+            raise ValueError(
+                "artifact sink artifact_paths is missing required kinds: "
+                + ", ".join(sorted(missing_path_kinds))
+            )
+        extra_path_kinds = set(artifact_path_kinds) - set(required_artifacts)
+        if extra_path_kinds:
+            raise ValueError(
+                "artifact sink artifact_paths contains undeclared kinds: "
+                + ", ".join(sorted(extra_path_kinds))
+            )
+        if len({path.casefold() for _, path in artifact_paths}) != len(artifact_paths):
+            raise ValueError("artifact sink artifact_paths must use unique paths")
+        raw_primary_document_paths = payload.get("primary_document_paths")
+        if not isinstance(raw_primary_document_paths, dict):
+            raise ValueError(
+                "artifact sink primary_document_paths must be an object"
+            )
+        primary_document_paths = tuple(
+            (
+                str(kind).strip(),
+                _normalize_relative_path(
+                    path,
+                    f"primary document path for {kind}",
+                ),
+            )
+            for kind, path in raw_primary_document_paths.items()
+        )
+        primary_document_kinds = [kind for kind, _ in primary_document_paths]
+        if set(primary_document_kinds) != set(REQUIRED_PRIMARY_DOCUMENT_KINDS):
+            raise ValueError(
+                "artifact sink primary_document_paths must define exactly: "
+                + ", ".join(REQUIRED_PRIMARY_DOCUMENT_KINDS)
+            )
+        if len(primary_document_kinds) != len(set(primary_document_kinds)):
+            raise ValueError(
+                "artifact sink primary_document_paths must use unique kinds"
+            )
+        if len({path.casefold() for _, path in primary_document_paths}) != len(
+            primary_document_paths
+        ):
+            raise ValueError(
+                "artifact sink primary_document_paths must use unique paths"
+            )
+        manifest_path = _normalize_relative_path(
+            payload.get("manifest_path"),
+            "artifact sink manifest_path",
+        )
+        legacy_compatibility_path = _normalize_relative_path(
+            payload.get("legacy_compatibility_path"),
+            "artifact sink legacy_compatibility_path",
+        )
+        all_contract_paths = [path for _, path in artifact_paths]
+        all_contract_paths.extend(path for _, path in primary_document_paths)
+        all_contract_paths.append(manifest_path)
+        all_contract_paths.append(legacy_compatibility_path)
+        if len(all_contract_paths) != len(
+            {path.casefold() for path in all_contract_paths}
+        ):
+            raise ValueError(
+                "artifact sink artifact, primary document, and manifest paths must be distinct"
+            )
+        raw_legacy_roots = payload.get("legacy_documentation_roots")
+        if not isinstance(raw_legacy_roots, list):
+            raise ValueError(
+                "artifact sink legacy_documentation_roots must be a list"
+            )
+        legacy_documentation_roots = tuple(
+            _normalize_relative_path(path, "legacy documentation root")
+            for path in raw_legacy_roots
+        )
+        if len(legacy_documentation_roots) != len(
+            REQUIRED_PRIMARY_DOCUMENT_KINDS
+        ):
+            raise ValueError(
+                "artifact sink legacy_documentation_roots must map requirement and plan"
+            )
+        if len({root.casefold() for root in legacy_documentation_roots}) != len(
+            legacy_documentation_roots
+        ):
+            raise ValueError(
+                "artifact sink legacy_documentation_roots must be unique"
+            )
+        legacy_removal_release = str(
+            payload.get("legacy_removal_release") or ""
+        ).strip()
+        if not legacy_removal_release:
+            raise ValueError("artifact sink legacy_removal_release must be non-empty")
+        legacy_write_mode = str(
+            payload.get("legacy_write_mode") or ""
+        ).strip().lower()
+        if legacy_write_mode not in ALLOWED_LEGACY_WRITE_MODES:
+            raise ValueError(
+                "unsupported artifact sink legacy_write_mode: " + legacy_write_mode
+            )
         return cls(
             schema_version=schema_version,
             root=_normalize_relative_path(payload.get("root"), "artifact sink root"),
             required_artifacts=required_artifacts,
             required_metadata=required_metadata,
+            artifact_paths=artifact_paths,
+            primary_document_paths=primary_document_paths,
+            manifest_path=manifest_path,
+            legacy_compatibility_path=legacy_compatibility_path,
+            legacy_documentation_roots=legacy_documentation_roots,
+            legacy_removal_release=legacy_removal_release,
+            legacy_write_mode=legacy_write_mode,
         )
+
+    @property
+    def artifact_path_map(self) -> dict[str, str]:
+        return dict(self.artifact_paths)
+
+    @property
+    def primary_document_path_map(self) -> dict[str, str]:
+        return dict(self.primary_document_paths)
+
+    @property
+    def legacy_documentation_root_map(self) -> dict[str, str]:
+        return dict(
+            zip(
+                REQUIRED_PRIMARY_DOCUMENT_KINDS,
+                self.legacy_documentation_roots,
+                strict=True,
+            )
+        )
+
+    def resolve_run_root(self, workspace_root: str | Path, run_id: str) -> Path:
+        workspace = Path(workspace_root).resolve()
+        normalized_run_id = _normalize_run_id(run_id)
+        run_root = (workspace / Path(self.root) / normalized_run_id).resolve()
+        if not run_root.is_relative_to(workspace):
+            raise ValueError("run artifact root resolves outside the governed workspace")
+        return run_root
+
+    def resolve_run_artifact_paths(
+        self,
+        workspace_root: str | Path,
+        run_id: str,
+    ) -> dict[str, Path]:
+        run_root = self.resolve_run_root(workspace_root, run_id)
+        paths = {
+            kind: (run_root / Path(path)).resolve()
+            for kind, path in self.artifact_paths
+        }
+        paths["manifest"] = (run_root / Path(self.manifest_path)).resolve()
+        paths["legacy_compatibility"] = (
+            run_root / Path(self.legacy_compatibility_path)
+        ).resolve()
+        for kind, path in paths.items():
+            if not path.is_relative_to(run_root):
+                raise ValueError(f"artifact path resolves outside the run root: {kind}")
+        return paths
+
+    def resolve_run_primary_document_paths(
+        self,
+        workspace_root: str | Path,
+        run_id: str,
+    ) -> dict[str, Path]:
+        run_root = self.resolve_run_root(workspace_root, run_id)
+        paths = {
+            kind: (run_root / Path(path)).resolve()
+            for kind, path in self.primary_document_paths
+        }
+        for kind, path in paths.items():
+            if not path.is_relative_to(run_root):
+                raise ValueError(
+                    f"primary document path resolves outside the run root: {kind}"
+                )
+        return paths
 
     def model_dump(self) -> dict[str, Any]:
         return {
@@ -137,6 +344,13 @@ class ArtifactSinkContract:
             "root": self.root,
             "required_artifacts": list(self.required_artifacts),
             "required_metadata": list(self.required_metadata),
+            "artifact_paths": self.artifact_path_map,
+            "primary_document_paths": self.primary_document_path_map,
+            "manifest_path": self.manifest_path,
+            "legacy_compatibility_path": self.legacy_compatibility_path,
+            "legacy_documentation_roots": list(self.legacy_documentation_roots),
+            "legacy_removal_release": self.legacy_removal_release,
+            "legacy_write_mode": self.legacy_write_mode,
         }
 
 
@@ -148,6 +362,7 @@ class RunArtifactManifest:
     artifacts: dict[str, str]
     commit_sha: str
     execution_environment: dict[str, str]
+    legacy_compatibility: dict[str, Any]
 
     @classmethod
     def model_validate(
@@ -160,9 +375,7 @@ class RunArtifactManifest:
             raise ValueError(
                 "run artifact schema_version does not match the artifact sink contract"
             )
-        run_id = str(payload.get("run_id") or "").strip()
-        if not run_id:
-            raise ValueError("run artifact manifest requires run_id")
+        run_id = _normalize_run_id(payload.get("run_id"), "run artifact manifest run_id")
         raw_artifacts = payload.get("artifacts")
         if not isinstance(raw_artifacts, dict):
             raise ValueError("run artifact manifest artifacts must be an object")
@@ -176,8 +389,12 @@ class RunArtifactManifest:
                 "run artifact manifest is missing artifacts: "
                 + ", ".join(sorted(missing_artifacts))
             )
-        if len(set(artifacts.values())) != len(artifacts):
+        if len({path.casefold() for path in artifacts.values()}) != len(artifacts):
             raise ValueError("run artifact paths must be unique")
+        if artifacts != artifact_sink.artifact_path_map:
+            raise ValueError(
+                "run artifact manifest paths must match the artifact sink contract"
+            )
         commit_sha = str(payload.get("commit_sha") or "").strip()
         if not commit_sha:
             raise ValueError("run artifact manifest requires commit_sha")
@@ -205,6 +422,57 @@ class RunArtifactManifest:
                 "run artifact root must be a child of the artifact sink root: "
                 f"{artifact_sink.root}"
             )
+        expected_artifact_root = (
+            PurePosixPath(artifact_sink.root) / run_id
+        ).as_posix()
+        if artifact_root != expected_artifact_root:
+            raise ValueError(
+                "run artifact root must match artifact sink root and run_id"
+            )
+        raw_legacy_compatibility = payload.get("legacy_compatibility")
+        if not isinstance(raw_legacy_compatibility, dict):
+            raise ValueError("legacy_compatibility must be an object")
+        legacy_compatibility = dict(raw_legacy_compatibility)
+        if (
+            str(legacy_compatibility.get("mode") or "").strip().lower()
+            != artifact_sink.legacy_write_mode
+        ):
+            raise ValueError(
+                "legacy compatibility mode must match the artifact sink contract"
+            )
+        if (
+            str(legacy_compatibility.get("removal_release") or "").strip()
+            != artifact_sink.legacy_removal_release
+        ):
+            raise ValueError(
+                "legacy compatibility removal_release must match the artifact sink contract"
+            )
+        raw_documentation_roots = legacy_compatibility.get("documentation_roots")
+        if not isinstance(raw_documentation_roots, list) or tuple(
+            str(root).replace("\\", "/").strip()
+            for root in raw_documentation_roots
+        ) != artifact_sink.legacy_documentation_roots:
+            raise ValueError(
+                "legacy compatibility documentation_roots must match the artifact sink contract"
+            )
+        raw_writes = legacy_compatibility.get("writes")
+        if not isinstance(raw_writes, list) or any(
+            not str(path or "").strip() for path in raw_writes
+        ):
+            raise ValueError("legacy compatibility writes must be a list of paths")
+        if artifact_sink.legacy_write_mode == "disabled" and raw_writes:
+            raise ValueError(
+                "disabled legacy compatibility cannot declare writes"
+            )
+        if legacy_compatibility.get("observable") is not True:
+            raise ValueError("legacy compatibility must be observable")
+        legacy_compatibility = {
+            "mode": artifact_sink.legacy_write_mode,
+            "removal_release": artifact_sink.legacy_removal_release,
+            "documentation_roots": list(artifact_sink.legacy_documentation_roots),
+            "writes": [str(path).strip() for path in raw_writes],
+            "observable": True,
+        }
         return cls(
             schema_version=schema_version,
             run_id=run_id,
@@ -212,6 +480,7 @@ class RunArtifactManifest:
             artifacts=artifacts,
             commit_sha=commit_sha,
             execution_environment=execution_environment,
+            legacy_compatibility=legacy_compatibility,
         )
 
     def model_dump(self) -> dict[str, Any]:
@@ -222,6 +491,7 @@ class RunArtifactManifest:
             "artifacts": dict(self.artifacts),
             "commit_sha": self.commit_sha,
             "execution_environment": dict(self.execution_environment),
+            "legacy_compatibility": dict(self.legacy_compatibility),
         }
 
     def resolve_artifact_paths(

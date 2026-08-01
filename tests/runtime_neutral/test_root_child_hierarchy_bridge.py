@@ -322,8 +322,10 @@ class RootChildHierarchyBridgeTests(unittest.TestCase):
             self.assertTrue(runtime_input_packet["authority_flags"]["allow_global_dispatch"])
             self.assertTrue(runtime_input_packet["authority_flags"]["allow_completion_claim"])
 
-            self.assertEqual("requirements", requirement_doc_path.parent.name)
-            self.assertEqual("plans", execution_plan_path.parent.name)
+            self.assertEqual(summary["run_id"], requirement_doc_path.parent.name)
+            self.assertEqual("runs", requirement_doc_path.parent.parent.name)
+            self.assertEqual(summary["run_id"], execution_plan_path.parent.name)
+            self.assertEqual("runs", execution_plan_path.parent.parent.name)
             self.assertEqual("root", execution_manifest["governance_scope"])
             self.assertNotIn("route_runtime_alignment", execution_manifest)
             self.assertEqual("agent_action_required", module_handoff["status"])

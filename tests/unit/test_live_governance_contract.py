@@ -63,6 +63,21 @@ def _contract_payload(
             "root": ".vibeskills/runs",
             "required_artifacts": ["requirement", "plan", "status", "proof"],
             "required_metadata": ["commit_sha", "execution_environment"],
+            "artifact_paths": {
+                "requirement": "requirement.json",
+                "plan": "plan.json",
+                "status": "status.json",
+                "proof": "proof.json",
+            },
+            "primary_document_paths": {
+                "requirement": "requirement.md",
+                "plan": "plan.md",
+            },
+            "manifest_path": "manifest.json",
+            "legacy_compatibility_path": "legacy-compatibility.json",
+            "legacy_documentation_roots": ["docs/requirements", "docs/plans"],
+            "legacy_removal_release": "4.1.0",
+            "legacy_write_mode": "dual_write",
         },
     }
 
@@ -82,6 +97,13 @@ def _run_manifest_payload() -> dict:
         "execution_environment": {
             "os": "windows",
             "python": "3.10",
+        },
+        "legacy_compatibility": {
+            "mode": "dual_write",
+            "removal_release": "4.1.0",
+            "documentation_roots": ["docs/requirements", "docs/plans"],
+            "writes": [],
+            "observable": True,
         },
     }
 
@@ -144,6 +166,10 @@ def test_repo_ships_a_valid_live_governance_contract() -> None:
         "commit_sha",
         "execution_environment",
     )
+    assert contract.artifact_sink.primary_document_path_map == {
+        "requirement": "requirement.md",
+        "plan": "plan.md",
+    }
 
 
 def test_runtime_config_manifest_packages_live_governance_contract() -> None:
@@ -273,6 +299,58 @@ def test_run_artifact_manifest_requires_complete_artifact_set() -> None:
     manifest_payload["artifacts"].pop("proof")
 
     with pytest.raises(ValueError, match="proof"):
+        contract.validate_run_artifact_manifest(manifest_payload)
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "artifact_paths",
+        "primary_document_paths",
+        "manifest_path",
+        "legacy_compatibility_path",
+        "legacy_documentation_roots",
+        "legacy_removal_release",
+        "legacy_write_mode",
+    ],
+)
+def test_artifact_sink_rejects_missing_cutover_fields(field: str) -> None:
+    payload = _contract_payload()
+    payload["artifact_sink"].pop(field)
+
+    with pytest.raises(ValueError, match=field):
+        LiveGovernanceContract.model_validate(payload)
+
+
+def test_run_artifact_manifest_paths_must_match_the_contract() -> None:
+    contract = LiveGovernanceContract.model_validate(_contract_payload())
+    manifest_payload = _run_manifest_payload()
+    manifest_payload["artifacts"]["proof"] = "other-proof.json"
+
+    with pytest.raises(ValueError, match="must match"):
+        contract.validate_run_artifact_manifest(manifest_payload)
+
+
+def test_run_artifact_manifest_requires_explicit_legacy_compatibility() -> None:
+    contract = LiveGovernanceContract.model_validate(_contract_payload())
+    manifest_payload = _run_manifest_payload()
+    manifest_payload.pop("legacy_compatibility")
+
+    with pytest.raises(ValueError, match="legacy_compatibility"):
+        contract.validate_run_artifact_manifest(manifest_payload)
+
+
+def test_disabled_legacy_compatibility_rejects_declared_writes() -> None:
+    contract_payload = _contract_payload()
+    contract_payload["artifact_sink"]["legacy_write_mode"] = "disabled"
+    contract = LiveGovernanceContract.model_validate(contract_payload)
+    manifest_payload = _run_manifest_payload()
+    manifest_payload["legacy_compatibility"]["mode"] = "disabled"
+    manifest_payload["legacy_compatibility"]["writes"] = [
+        "docs/requirements/legacy.md"
+    ]
+
+    with pytest.raises(ValueError, match="disabled"):
         contract.validate_run_artifact_manifest(manifest_payload)
 
 

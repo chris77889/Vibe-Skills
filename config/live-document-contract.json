@@ -116,6 +116,24 @@
     "required_metadata": [
       "commit_sha",
       "execution_environment"
-    ]
+    ],
+    "artifact_paths": {
+      "requirement": "requirement.json",
+      "plan": "plan.json",
+      "status": "status.json",
+      "proof": "proof.json"
+    },
+    "primary_document_paths": {
+      "requirement": "requirement.md",
+      "plan": "plan.md"
+    },
+    "manifest_path": "manifest.json",
+    "legacy_compatibility_path": "legacy-compatibility.json",
+    "legacy_documentation_roots": [
+      "docs/requirements",
+      "docs/plans"
+    ],
+    "legacy_removal_release": "4.1.0",
+    "legacy_write_mode": "dual_write"
   }
 }
