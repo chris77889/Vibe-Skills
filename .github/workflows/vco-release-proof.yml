@@ -93,6 +93,7 @@ jobs:
               --output-dir dist/release
 
       - name: Generate formal release proof
+        id: formal-proof
         if: always()
         shell: bash
         run: |
@@ -116,7 +117,12 @@ jobs:
           retention-days: 90
 
       - name: Attach proof to GitHub Release
-        if: always()
+        if: >-
+          steps.release-contract.outcome == 'success' &&
+          steps.release-validation.outcome == 'success' &&
+          steps.distribution.outcome == 'success' &&
+          steps.release-bundle.outcome == 'success' &&
+          steps.formal-proof.outcome == 'success'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -143,6 +149,7 @@ jobs:
           if [[ "${{ steps.release-contract.outcome }}" != "success" || \
                 "${{ steps.release-validation.outcome }}" != "success" || \
                 "${{ steps.distribution.outcome }}" != "success" || \
-                "${{ steps.release-bundle.outcome }}" != "success" ]]; then
+                "${{ steps.release-bundle.outcome }}" != "success" || \
+                "${{ steps.formal-proof.outcome }}" != "success" ]]; then
             exit 1
           fi

@@ -33,6 +33,13 @@ EXPECTED_PYTHON_VALIDATION_TARGETS = [
 ]
 
 
+def _workflow_step_block(text: str, step_name: str) -> str:
+    marker = f"      - name: {step_name}\n"
+    start = text.index(marker)
+    end = text.find("\n      - name: ", start + len(marker))
+    return text[start:] if end == -1 else text[start:end]
+
+
 class PythonValidationContractTests(unittest.TestCase):
     def test_repo_declares_tests_as_the_default_pytest_collection_surface(self) -> None:
         self.assertTrue(PYTEST_INI.exists(), "pytest.ini should exist at the repo root")
@@ -86,6 +93,10 @@ class PythonValidationContractTests(unittest.TestCase):
 
     def test_release_workflow_attaches_generated_proof_to_github_release(self) -> None:
         text = RELEASE_PROOF_WORKFLOW.read_text(encoding="utf-8-sig")
+        formal_proof = _workflow_step_block(text, "Generate formal release proof")
+        retained_proof = _workflow_step_block(text, "Retain formal release proof")
+        release_upload = _workflow_step_block(text, "Attach proof to GitHub Release")
+        proof_enforcement = _workflow_step_block(text, "Enforce formal release proof")
 
         self.assertIn("release:", text)
         self.assertIn("types: [published]", text)
@@ -101,6 +112,24 @@ class PythonValidationContractTests(unittest.TestCase):
         self.assertIn("persist-credentials: false", text)
         self.assertIn('if [ "${#targets[@]}" -eq 0 ]; then', text)
         self.assertIn("canonical python validation target list is empty", text)
+        self.assertIn("id: formal-proof", formal_proof)
+        self.assertIn("if: always()", formal_proof)
+        self.assertIn("if: always()", retained_proof)
+        self.assertIn("actions/upload-artifact@v4", retained_proof)
+        self.assertIn("outputs/release-proof", retained_proof)
+        self.assertIn("dist/release", retained_proof)
+        self.assertNotIn("if: always()", release_upload)
+        self.assertIn("gh release upload", release_upload)
+        for step_id in (
+            "release-contract",
+            "release-validation",
+            "distribution",
+            "release-bundle",
+            "formal-proof",
+        ):
+            outcome_guard = f"steps.{step_id}.outcome == 'success'"
+            self.assertIn(outcome_guard, release_upload)
+            self.assertIn(f"steps.{step_id}.outcome", proof_enforcement)
 
     def test_default_docs_entry_uses_live_state_sources(self) -> None:
         docs_text = DOCS_INDEX.read_text(encoding="utf-8-sig")
