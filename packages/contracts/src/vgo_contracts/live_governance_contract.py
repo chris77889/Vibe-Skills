@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+import posixpath
 import re
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
+from urllib.parse import unquote, urlsplit
 
 
 LIVE_GOVERNANCE_CONTRACT_RELPATH = Path("config/live-document-contract.json")
@@ -26,10 +28,17 @@ REQUIRED_PRIMARY_DOCUMENT_KINDS: tuple[str, ...] = (
 ALLOWED_LEGACY_WRITE_MODES = frozenset({"disabled", "dual_write", "explicit"})
 REQUIRED_GOVERNED_ROOTS = frozenset({".", "docs", "references"})
 ALLOWED_DOCUMENT_LIFECYCLES = frozenset({"live", "transitional", "retained"})
+ALLOWED_EXCLUDED_PATHS = frozenset({"THIRD_PARTY_LICENSES.md"})
+ALLOWED_EXCLUDED_PREFIXES = frozenset({"references/provenance/"})
+PULL_REQUEST_PROOF_RETENTION_DAYS = 30
+MAIN_PROOF_RETENTION_DAYS = 90
+FORMAL_RELEASE_PROOF_DESTINATION = "github_release"
 
 _SLUG_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
 _WINDOWS_DRIVE_PATTERN = re.compile(r"^[A-Za-z]:")
 _RUN_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+_MARKDOWN_LINK_PATTERN = re.compile(r"(?<!!)\[[^\]]*\]\(([^)]+)\)")
+_HTML_LINK_PATTERN = re.compile(r'''href=["']([^"']+)["']''', re.IGNORECASE)
 
 
 def _normalize_relative_path(value: Any, field_name: str, *, allow_dot: bool = False) -> str:
@@ -102,6 +111,76 @@ class LiveDocumentEntry:
             "path": self.path,
             "owner": self.owner,
             "lifecycle": self.lifecycle,
+        }
+
+
+@dataclass(slots=True, frozen=True)
+class StableEntryLinks:
+    source: str
+    targets: tuple[str, ...]
+
+    @classmethod
+    def model_validate(cls, payload: dict[str, Any]) -> "StableEntryLinks":
+        source = _normalize_relative_path(
+            payload.get("source"),
+            "stable entry source",
+        )
+        raw_targets = payload.get("targets")
+        if not isinstance(raw_targets, list) or not raw_targets:
+            raise ValueError("stable entry targets must be a non-empty list")
+        targets = tuple(
+            _normalize_relative_path(target, "stable entry target")
+            for target in raw_targets
+        )
+        if len({target.casefold() for target in targets}) != len(targets):
+            raise ValueError("stable entry targets must be unique")
+        return cls(source=source, targets=targets)
+
+    def model_dump(self) -> dict[str, Any]:
+        return {
+            "source": self.source,
+            "targets": list(self.targets),
+        }
+
+
+@dataclass(slots=True, frozen=True)
+class ProofRetentionPolicy:
+    pull_request_days: int
+    main_and_scheduled_days: int
+    formal_release: str
+
+    @classmethod
+    def model_validate(cls, payload: dict[str, Any]) -> "ProofRetentionPolicy":
+        pull_request_days = int(payload.get("pull_request_days") or 0)
+        main_and_scheduled_days = int(
+            payload.get("main_and_scheduled_days") or 0
+        )
+        formal_release = str(payload.get("formal_release") or "").strip().lower()
+        if pull_request_days != PULL_REQUEST_PROOF_RETENTION_DAYS:
+            raise ValueError(
+                "proof retention for pull requests must be exactly "
+                f"{PULL_REQUEST_PROOF_RETENTION_DAYS} days"
+            )
+        if main_and_scheduled_days != MAIN_PROOF_RETENTION_DAYS:
+            raise ValueError(
+                "proof retention for main and scheduled runs must be exactly "
+                f"{MAIN_PROOF_RETENTION_DAYS} days"
+            )
+        if formal_release != FORMAL_RELEASE_PROOF_DESTINATION:
+            raise ValueError(
+                "proof retention for formal releases must use GitHub Release"
+            )
+        return cls(
+            pull_request_days=pull_request_days,
+            main_and_scheduled_days=main_and_scheduled_days,
+            formal_release=formal_release,
+        )
+
+    def model_dump(self) -> dict[str, Any]:
+        return {
+            "pull_request_days": self.pull_request_days,
+            "main_and_scheduled_days": self.main_and_scheduled_days,
+            "formal_release": self.formal_release,
         }
 
 
@@ -523,6 +602,8 @@ class LiveGovernanceContract:
     excluded_paths: tuple[str, ...]
     excluded_prefixes: tuple[str, ...]
     documents: tuple[LiveDocumentEntry, ...]
+    stable_entry_links: tuple[StableEntryLinks, ...]
+    proof_retention: ProofRetentionPolicy
     artifact_sink: ArtifactSinkContract
 
     @classmethod
@@ -556,6 +637,26 @@ class LiveGovernanceContract:
             _normalize_relative_path(path, "excluded prefix").rstrip("/") + "/"
             for path in list(payload.get("excluded_prefixes") or [])
         )
+        unsupported_excluded_paths = set(excluded_paths) - ALLOWED_EXCLUDED_PATHS
+        if unsupported_excluded_paths:
+            raise ValueError(
+                "unsupported excluded path: "
+                + ", ".join(sorted(unsupported_excluded_paths))
+            )
+        unsupported_excluded_prefixes = (
+            set(excluded_prefixes) - ALLOWED_EXCLUDED_PREFIXES
+        )
+        if unsupported_excluded_prefixes:
+            raise ValueError(
+                "unsupported excluded prefix: "
+                + ", ".join(sorted(unsupported_excluded_prefixes))
+            )
+        if len({path.casefold() for path in excluded_paths}) != len(excluded_paths):
+            raise ValueError("excluded paths must be unique")
+        if len({path.casefold() for path in excluded_prefixes}) != len(
+            excluded_prefixes
+        ):
+            raise ValueError("excluded prefixes must be unique")
         raw_documents = payload.get("documents")
         if not isinstance(raw_documents, list):
             raise ValueError("documents must be a list")
@@ -590,6 +691,33 @@ class LiveGovernanceContract:
                 raise ValueError(
                     f"live document is outside governed roots: {document.path}"
                 )
+        raw_stable_entry_links = payload.get("stable_entry_links")
+        if not isinstance(raw_stable_entry_links, list) or not raw_stable_entry_links:
+            raise ValueError("stable_entry_links must be a non-empty list")
+        stable_entry_links = tuple(
+            StableEntryLinks.model_validate(dict(entry))
+            for entry in raw_stable_entry_links
+            if isinstance(entry, dict)
+        )
+        if len(stable_entry_links) != len(raw_stable_entry_links):
+            raise ValueError("every stable entry link declaration must be an object")
+        stable_sources = [entry.source for entry in stable_entry_links]
+        if len({source.casefold() for source in stable_sources}) != len(stable_sources):
+            raise ValueError("stable entry sources must be unique")
+        registered_paths = {path.casefold() for path in document_paths}
+        for entry in stable_entry_links:
+            if entry.source.casefold() not in registered_paths:
+                raise ValueError(
+                    f"stable entry source must be registered: {entry.source}"
+                )
+            for target in entry.targets:
+                if target.casefold() not in registered_paths:
+                    raise ValueError(
+                        f"stable entry target must be registered: {target}"
+                    )
+        raw_proof_retention = payload.get("proof_retention")
+        if not isinstance(raw_proof_retention, dict):
+            raise ValueError("proof_retention must be an object")
         raw_artifact_sink = payload.get("artifact_sink")
         if not isinstance(raw_artifact_sink, dict):
             raise ValueError("artifact_sink must be an object")
@@ -600,6 +728,8 @@ class LiveGovernanceContract:
             excluded_paths=excluded_paths,
             excluded_prefixes=excluded_prefixes,
             documents=documents,
+            stable_entry_links=stable_entry_links,
+            proof_retention=ProofRetentionPolicy.model_validate(raw_proof_retention),
             artifact_sink=ArtifactSinkContract.model_validate(raw_artifact_sink),
         )
 
@@ -617,6 +747,10 @@ class LiveGovernanceContract:
             "excluded_paths": list(self.excluded_paths),
             "excluded_prefixes": list(self.excluded_prefixes),
             "documents": [document.model_dump() for document in self.documents],
+            "stable_entry_links": [
+                entry.model_dump() for entry in self.stable_entry_links
+            ],
+            "proof_retention": self.proof_retention.model_dump(),
             "artifact_sink": self.artifact_sink.model_dump(),
         }
 
@@ -679,7 +813,106 @@ def validate_live_document_workspace(
         if not path.is_file():
             raise ValueError(f"registered live document does not exist: {document.path}")
         validated_paths.append(path)
+    for entry in contract.stable_entry_links:
+        source_path = root / Path(entry.source)
+        linked_targets = _resolve_markdown_link_targets(
+            source_path.read_text(encoding="utf-8-sig"),
+            entry.source,
+        )
+        for target in entry.targets:
+            if target.casefold() not in linked_targets:
+                raise ValueError(
+                    "stable entry link is missing: "
+                    f"{entry.source} -> {target}"
+                )
     return validated_paths
+
+
+def _resolve_markdown_link_targets(markdown: str, source: str) -> set[str]:
+    source_parent = PurePosixPath(source).parent.as_posix()
+    resolved_targets: set[str] = set()
+    raw_destinations = [
+        match.group(1).strip() for match in _MARKDOWN_LINK_PATTERN.finditer(markdown)
+    ]
+    raw_destinations.extend(
+        match.group(1).strip() for match in _HTML_LINK_PATTERN.finditer(markdown)
+    )
+    for raw_destination in raw_destinations:
+        if raw_destination.startswith("<") and ">" in raw_destination:
+            raw_destination = raw_destination[1 : raw_destination.index(">")]
+        else:
+            raw_destination = raw_destination.split(maxsplit=1)[0]
+        parsed = urlsplit(raw_destination)
+        if parsed.scheme or parsed.netloc or not parsed.path:
+            continue
+        decoded_path = unquote(parsed.path).replace("\\", "/")
+        if decoded_path.startswith("/") or _WINDOWS_DRIVE_PATTERN.match(decoded_path):
+            continue
+        resolved = posixpath.normpath(
+            posixpath.join(source_parent, decoded_path)
+        )
+        if resolved == "." or resolved == ".." or resolved.startswith("../"):
+            continue
+        resolved_targets.add(PurePosixPath(resolved).as_posix().casefold())
+    return resolved_targets
+
+
+def validate_live_document_changes(
+    contract: LiveGovernanceContract,
+    added_paths: list[str] | tuple[str, ...],
+) -> list[str]:
+    registered_paths = {
+        document.path.casefold(): document.path for document in contract.documents
+    }
+    validated_paths: list[str] = []
+    unregistered_paths: list[str] = []
+    for raw_path in added_paths:
+        path = _normalize_relative_path(raw_path, "added path")
+        if not path.casefold().endswith(".md"):
+            continue
+        if not _is_path_under_governed_roots(path, contract.governed_roots):
+            continue
+        if path.casefold() in {value.casefold() for value in contract.excluded_paths}:
+            continue
+        if any(
+            path.casefold().startswith(prefix.casefold())
+            for prefix in contract.excluded_prefixes
+        ):
+            continue
+        registered_path = registered_paths.get(path.casefold())
+        if registered_path is None:
+            unregistered_paths.append(path)
+        else:
+            validated_paths.append(registered_path)
+    if unregistered_paths:
+        raise ValueError(
+            "new governed Markdown is not registered: "
+            + ", ".join(sorted(unregistered_paths))
+        )
+    return validated_paths
+
+
+def validate_live_document_registry_transition(
+    contract: LiveGovernanceContract,
+    previous_document_paths: list[str] | tuple[str, ...],
+    repo_root: str | Path,
+) -> list[str]:
+    current_paths = {document.path.casefold() for document in contract.documents}
+    previous_paths = {
+        _normalize_relative_path(path, "previous live document path")
+        for path in previous_document_paths
+    }
+    removed_paths = sorted(
+        path for path in previous_paths if path.casefold() not in current_paths
+    )
+    root = Path(repo_root).resolve()
+    lingering_paths = [path for path in removed_paths if (root / Path(path)).exists()]
+    if lingering_paths:
+        raise ValueError(
+            "document removed from the registry still exists in the workspace: "
+            + ", ".join(lingering_paths)
+        )
+    return removed_paths
 
 
 def validate_run_artifact_workspace(

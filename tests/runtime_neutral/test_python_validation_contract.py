@@ -10,8 +10,12 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 PYTEST_INI = REPO_ROOT / "pytest.ini"
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "vco-gates.yml"
 OPTIONAL_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "vco-optional-audits.yml"
+RELEASE_PROOF_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "vco-release-proof.yml"
 TARGETS_FILE = REPO_ROOT / "config" / "python-validation-targets.txt"
+DOCS_INDEX = REPO_ROOT / "docs" / "README.md"
+TRACKED_CURRENT_STATE = REPO_ROOT / "docs" / "status" / "current-state.md"
 PACK_MANIFEST = REPO_ROOT / "config" / "pack-manifest.json"
+LIVE_DOCUMENT_CONTRACT = REPO_ROOT / "config" / "live-document-contract.json"
 RESOLVE_PACK_ROUTE = REPO_ROOT / "scripts" / "router" / "resolve-pack-route.ps1"
 CONFTEST = REPO_ROOT / "tests" / "conftest.py"
 PYTHON_HELPERS = REPO_ROOT / "scripts" / "common" / "python_helpers.sh"
@@ -22,6 +26,8 @@ EXPECTED_PYTHON_VALIDATION_TARGETS = [
     "tests/runtime_neutral/test_runtime_delivery_acceptance.py",
     "tests/runtime_neutral/test_custom_admission_bridge.py",
     "tests/runtime_neutral/test_router_authority_safe_fallback.py",
+    "tests/runtime_neutral/test_live_document_contract_gate.py",
+    "tests/integration/test_shared_run_artifact_contract.py",
     "tests/runtime_neutral/test_test_baseline_audit.py",
     "tests/runtime_neutral/test_python_validation_contract.py",
 ]
@@ -50,6 +56,13 @@ class PythonValidationContractTests(unittest.TestCase):
         self.assertIn("ubuntu-latest", text)
         self.assertIn("windows-latest", text)
         self.assertIn("test-baseline-audit.py --run-layer integration_host_boundary", text)
+        self.assertIn("scripts/verify/live-document-gate.py", text)
+        self.assertIn("scripts/verify/publish-proof.py", text)
+        self.assertIn("actions/upload-artifact@v4", text)
+        self.assertIn("retention-days:", text)
+        self.assertIn("vibe-developer-entry-gate.ps1", text)
+        self.assertNotIn("vibe-current-routing-contract-scan.ps1", text)
+        self.assertNotIn("test_retired_agent_execution_surfaces.py", text)
         self.assertNotIn("vibe-pack-regression-matrix.ps1", text)
         self.assertNotIn("vibe-offline-skills-gate.ps1", text)
 
@@ -61,10 +74,53 @@ class PythonValidationContractTests(unittest.TestCase):
         self.assertIn("capability_baseline", text)
         self.assertIn("packaging_release", text)
         self.assertIn("host_boundary", text)
+        self.assertIn("history_surface", text)
         self.assertIn("touched_packaging_release", text)
         self.assertIn("integration_host_boundary", text)
+        self.assertIn("touched_historical_governance", text)
         self.assertNotIn("pull_request:", text)
         self.assertNotIn("push:", text)
+
+    def test_release_workflow_attaches_generated_proof_to_github_release(self) -> None:
+        text = RELEASE_PROOF_WORKFLOW.read_text(encoding="utf-8-sig")
+
+        self.assertIn("release:", text)
+        self.assertIn("types: [published]", text)
+        self.assertIn("contents: write", text)
+        self.assertIn("scripts/verify/publish-proof.py", text)
+        self.assertIn("scripts/release/build_release_bundle.py", text)
+        self.assertIn("proof-bundle.json", text)
+        self.assertIn("current-state.json", text)
+        self.assertIn("current-state.md", text)
+        self.assertIn("gh release upload", text)
+        self.assertIn("actions/upload-artifact@v4", text)
+        self.assertIn("retention-days: 90", text)
+
+    def test_default_docs_entry_uses_live_state_sources(self) -> None:
+        docs_text = DOCS_INDEX.read_text(encoding="utf-8-sig")
+
+        self.assertFalse(TRACKED_CURRENT_STATE.exists())
+        self.assertNotIn("status/current-state.md", docs_text)
+        self.assertIn("actions/workflows/vco-gates.yml", docs_text)
+        self.assertIn("releases/latest", docs_text)
+        self.assertIn("check.ps1", docs_text)
+
+    def test_workflow_retention_matches_the_live_document_contract(self) -> None:
+        contract = json.loads(LIVE_DOCUMENT_CONTRACT.read_text(encoding="utf-8"))
+        retention = contract["proof_retention"]
+        default_workflow = WORKFLOW.read_text(encoding="utf-8-sig")
+        release_workflow = RELEASE_PROOF_WORKFLOW.read_text(encoding="utf-8-sig")
+
+        self.assertIn(
+            f"&& {retention['pull_request_days']} || {retention['main_and_scheduled_days']}",
+            default_workflow,
+        )
+        self.assertIn(
+            f"retention-days: {retention['main_and_scheduled_days']}",
+            release_workflow,
+        )
+        self.assertEqual("github_release", retention["formal_release"])
+        self.assertIn("gh release upload", release_workflow)
 
     def test_shared_shell_python_helper_keeps_python_resolution_policy_canonical(self) -> None:
         self.assertTrue(PYTHON_HELPERS.exists(), "shared shell Python helper should exist")

@@ -16,6 +16,8 @@ import vgo_contracts  # noqa: E402
 from vgo_contracts.live_governance_contract import (  # noqa: E402
     LiveGovernanceContract,
     load_live_governance_contract,
+    validate_live_document_changes,
+    validate_live_document_registry_transition,
     validate_live_document_workspace,
     validate_run_artifact_workspace,
 )
@@ -58,6 +60,20 @@ def _contract_payload(
                 "lifecycle": "live",
             },
         ],
+        "stable_entry_links": [
+            {
+                "source": "README.md",
+                "targets": [
+                    "docs/runtime-contract.md",
+                    "references/proof-policy.md",
+                ],
+            }
+        ],
+        "proof_retention": {
+            "pull_request_days": 30,
+            "main_and_scheduled_days": 90,
+            "formal_release": "github_release",
+        },
         "artifact_sink": {
             "schema_version": 1,
             "root": ".vibeskills/runs",
@@ -115,7 +131,11 @@ def test_minimal_live_contract_workspace_emits_a_complete_run_artifact_manifest(
         json.dumps(contract_payload, indent=2) + "\n",
     )
     for document in contract_payload["documents"]:
-        _write(tmp_path / document["path"])
+        text = "# Contract\n"
+        if document["path"] == "README.md":
+            text += "\n- [Runtime](docs/runtime-contract.md)\n"
+            text += "- [Proof](references/proof-policy.md)\n"
+        _write(tmp_path / document["path"], text)
 
     contract = load_live_governance_contract(tmp_path / "docs")
     validated_paths = validate_live_document_workspace(contract, tmp_path)
@@ -146,6 +166,98 @@ def test_minimal_live_contract_workspace_emits_a_complete_run_artifact_manifest(
     )
     assert not (tmp_path / "docs" / "requirements").exists()
     assert not (tmp_path / "docs" / "plans").exists()
+
+
+def test_live_document_changes_reject_new_unregistered_markdown() -> None:
+    contract = LiveGovernanceContract.model_validate(_contract_payload())
+
+    with pytest.raises(ValueError, match="not registered"):
+        validate_live_document_changes(contract, ["docs/new-live-guide.md"])
+
+
+def test_live_document_changes_allow_registered_and_narrowly_excluded_markdown() -> None:
+    contract = LiveGovernanceContract.model_validate(_contract_payload())
+
+    assert validate_live_document_changes(
+        contract,
+        [
+            "README.md",
+            "THIRD_PARTY_LICENSES.md",
+            "references/provenance/source-record.md",
+            "bundled/skills/example/SKILL.md",
+        ],
+    ) == ["README.md"]
+
+
+def test_live_document_registry_removal_requires_file_removal(tmp_path: Path) -> None:
+    contract = LiveGovernanceContract.model_validate(_contract_payload())
+    retired_path = tmp_path / "docs" / "retired-live.md"
+    _write(retired_path)
+    previous_paths = [
+        *(document.path for document in contract.documents),
+        "docs/retired-live.md",
+    ]
+
+    with pytest.raises(ValueError, match="removed from the registry still exists"):
+        validate_live_document_registry_transition(
+            contract,
+            previous_paths,
+            tmp_path,
+        )
+
+    retired_path.unlink()
+    assert validate_live_document_registry_transition(
+        contract,
+        previous_paths,
+        tmp_path,
+    ) == ["docs/retired-live.md"]
+
+
+def test_live_document_workspace_rejects_missing_declared_stable_link(
+    tmp_path: Path,
+) -> None:
+    payload = _contract_payload()
+    for document in payload["documents"]:
+        _write(tmp_path / document["path"])
+    contract = LiveGovernanceContract.model_validate(payload)
+
+    with pytest.raises(ValueError, match="stable entry link is missing"):
+        validate_live_document_workspace(contract, tmp_path)
+
+
+def test_live_governance_contract_rejects_broad_document_exclusions() -> None:
+    payload = _contract_payload()
+    payload["excluded_prefixes"].append("docs/archive/")
+
+    with pytest.raises(ValueError, match="unsupported excluded prefix"):
+        LiveGovernanceContract.model_validate(payload)
+
+
+def test_live_governance_contract_requires_registered_stable_link_targets() -> None:
+    payload = _contract_payload()
+    payload["stable_entry_links"][0]["targets"].append("docs/unregistered.md")
+
+    with pytest.raises(ValueError, match="stable entry target must be registered"):
+        LiveGovernanceContract.model_validate(payload)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("pull_request_days", 29),
+        ("main_and_scheduled_days", 89),
+        ("formal_release", "workflow_artifact"),
+    ],
+)
+def test_live_governance_contract_enforces_proof_retention_classes(
+    field: str,
+    value: object,
+) -> None:
+    payload = _contract_payload()
+    payload["proof_retention"][field] = value
+
+    with pytest.raises(ValueError, match="proof retention"):
+        LiveGovernanceContract.model_validate(payload)
 
 
 def test_repo_ships_a_valid_live_governance_contract() -> None:
@@ -193,6 +305,10 @@ def test_live_governance_contract_is_a_public_package_interface() -> None:
     assert (
         vgo_contracts.validate_live_document_workspace
         is validate_live_document_workspace
+    )
+    assert (
+        vgo_contracts.validate_live_document_registry_transition
+        is validate_live_document_registry_transition
     )
     assert (
         vgo_contracts.validate_run_artifact_workspace

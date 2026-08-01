@@ -13,6 +13,7 @@ on:
           - capability_baseline
           - packaging_release
           - host_boundary
+          - history_surface
 
 jobs:
   baseline-collect:
@@ -69,7 +70,7 @@ jobs:
         run: |
           set -euo pipefail
           python_bin="$(bash scripts/common/python_helpers.sh --print-supported-python 'Optional capability baseline audit')"
-          for layer in default_install_lifecycle default_runtime_entry_truth default_routing_mainline; do
+          for layer in default_live_contracts default_install_lifecycle default_runtime_entry_truth default_routing_mainline; do
             "${python_bin}" scripts/verify/test-baseline-audit.py --run-layer "${layer}"
           done
 
@@ -126,3 +127,29 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           python .\scripts\verify\test-baseline-audit.py --run-layer integration_host_boundary
+
+  history-surface:
+    if: ${{ inputs.audit_suite == 'history_surface' }}
+    runs-on: windows-latest
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install pytest
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          python -m pip install --upgrade pip pytest
+
+      - name: Run touched historical governance audit
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          python .\scripts\verify\test-baseline-audit.py --run-layer touched_historical_governance
