@@ -310,6 +310,11 @@ def _copy_run_tree(*, source_root: Path, destination_root: Path) -> None:
                 f"run artifact copy path resolves outside its root: {destination}"
             )
         destination.parent.mkdir(parents=True, exist_ok=True)
+        _assert_no_symlink_components(
+            root=destination_root,
+            path=destination,
+            label="run artifact copy path",
+        )
         if destination.is_symlink():
             raise ValueError(
                 f"run artifact trees must not contain symlinks: {destination}"

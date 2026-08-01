@@ -14,6 +14,7 @@ RUNTIME_SRC = REPO_ROOT / "packages" / "runtime-core" / "src"
 if str(RUNTIME_SRC) not in sys.path:
     sys.path.insert(0, str(RUNTIME_SRC))
 
+from vgo_runtime.artifact_contract import _copy_run_tree
 from vgo_runtime.kernel.executor import execute_work_unit
 from vgo_runtime.kernel.finder import find_skill_candidates
 from vgo_runtime.kernel.loop import inspect_local_run, inspect_main, run_local_kernel
@@ -616,6 +617,43 @@ def test_run_local_kernel_rejects_symlinked_files_inside_a_legacy_run(
 
     canonical_root = agent_root / ".vibeskills" / "runs" / "linked-file-run"
     assert not (canonical_root / "linked.txt").exists()
+
+
+def test_copy_run_tree_rechecks_destination_components_after_directory_creation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_root = tmp_path / "source"
+    source_file = source_root / "nested" / "artifact.json"
+    source_file.parent.mkdir(parents=True)
+    source_file.write_text("source", encoding="utf-8")
+    destination_root = tmp_path / "destination"
+    external_root = tmp_path / "external"
+    external_root.mkdir()
+    destination_parent = destination_root / "nested"
+    original_mkdir = Path.mkdir
+
+    def mkdir_then_replace_with_symlink(
+        path: Path,
+        mode: int = 0o777,
+        parents: bool = False,
+        exist_ok: bool = False,
+    ) -> None:
+        original_mkdir(path, mode=mode, parents=parents, exist_ok=exist_ok)
+        if path != destination_parent:
+            return
+        path.rmdir()
+        _create_symlink_or_skip(path, external_root)
+
+    monkeypatch.setattr(Path, "mkdir", mkdir_then_replace_with_symlink)
+
+    with pytest.raises(ValueError, match="run artifact copy path must not contain symlinks"):
+        _copy_run_tree(
+            source_root=source_root,
+            destination_root=destination_root,
+        )
+
+    assert not (external_root / "artifact.json").exists()
 
 
 def test_inspect_local_run_does_not_use_legacy_fallback_for_explicit_workspace(
