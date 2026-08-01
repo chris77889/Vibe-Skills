@@ -46,6 +46,18 @@ class RuntimeArtifactProjection:
         return (Path(self.artifact_sink.root) / self.run_id).as_posix()
 
 
+def _assert_no_symlink_components(*, root: Path, path: Path, label: str) -> None:
+    try:
+        relative = path.relative_to(root)
+    except ValueError as exc:
+        raise ValueError(f"{label} resolves outside its root: {path}") from exc
+    current = root
+    for part in relative.parts:
+        current = current / part
+        if current.is_symlink():
+            raise ValueError(f"{label} must not contain symlinks: {current}")
+
+
 def _load_contract(repo_root: Path) -> LiveGovernanceContract:
     try:
         return load_live_governance_contract(repo_root.resolve())
@@ -86,6 +98,14 @@ def resolve_runtime_artifact_projection(
         resolved_workspace_root,
         normalized_run_id,
     )
+    legacy_run_root = (
+        resolved_agent_root / "vibe" / "runs" / normalized_run_id
+    )
+    _assert_no_symlink_components(
+        root=resolved_agent_root,
+        path=legacy_run_root,
+        label="legacy run path",
+    )
     return RuntimeArtifactProjection(
         contract=contract,
         workspace_root=resolved_workspace_root,
@@ -93,9 +113,7 @@ def resolve_runtime_artifact_projection(
         run_root=run_root,
         artifact_paths=artifact_paths,
         primary_document_paths=primary_document_paths,
-        legacy_run_root=(
-            resolved_agent_root / "vibe" / "runs" / normalized_run_id
-        ).resolve(),
+        legacy_run_root=legacy_run_root,
         # Calls that omit workspace_root are the pre-contract Python API. Keep
         # a marked read-compatible projection until that API is removed.
         legacy_projection_enabled=workspace_root is None,
@@ -258,13 +276,44 @@ def write_runtime_artifact_bundle(
     return manifest
 
 
-def _copy_run_tree(*, source_root: Path, destination_root: Path) -> None:
-    destination_root.mkdir(parents=True, exist_ok=True)
-    for source in source_root.rglob("*"):
-        if not source.is_file():
+def _validated_run_tree_files(root: Path) -> list[Path]:
+    if root.is_symlink():
+        raise ValueError(f"run artifact trees must not contain symlinks: {root}")
+    if not root.exists():
+        return []
+    resolved_root = root.resolve(strict=True)
+    files: list[Path] = []
+    for entry in root.rglob("*"):
+        if entry.is_symlink():
+            raise ValueError(
+                f"run artifact trees must not contain symlinks: {entry}"
+            )
+        if not entry.is_file():
             continue
+        if not entry.resolve(strict=True).is_relative_to(resolved_root):
+            raise ValueError(f"run artifact entry resolves outside its root: {entry}")
+        files.append(entry)
+    return files
+
+
+def _copy_run_tree(*, source_root: Path, destination_root: Path) -> None:
+    source_files = _validated_run_tree_files(source_root)
+    _validated_run_tree_files(destination_root)
+    destination_root.mkdir(parents=True, exist_ok=True)
+    resolved_destination_root = destination_root.resolve(strict=True)
+    for source in source_files:
         destination = destination_root / source.relative_to(source_root)
+        if not destination.resolve(strict=False).is_relative_to(
+            resolved_destination_root
+        ):
+            raise ValueError(
+                f"run artifact copy path resolves outside its root: {destination}"
+            )
         destination.parent.mkdir(parents=True, exist_ok=True)
+        if destination.is_symlink():
+            raise ValueError(
+                f"run artifact trees must not contain symlinks: {destination}"
+            )
         copy2(source, destination)
 
 

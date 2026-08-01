@@ -23,6 +23,13 @@ from vgo_runtime.kernel.task_card import build_task_card
 from vgo_runtime.kernel.verifier import verify_run
 
 
+def _create_symlink_or_skip(link: Path, target: Path) -> None:
+    try:
+        link.symlink_to(target, target_is_directory=target.is_dir())
+    except (NotImplementedError, OSError) as exc:
+        pytest.skip(f"symlink creation is unavailable: {exc}")
+
+
 def run_local_kernel_with_agent_choice(**kwargs: object) -> dict[str, object]:
     discovery = run_local_kernel(
         **{
@@ -566,6 +573,49 @@ def test_run_local_kernel_resumes_a_legacy_projection_in_the_canonical_sink(
     assert json.loads((canonical_root / "task-card.json").read_text(encoding="utf-8")) == json.loads(
         (legacy_root / "task-card.json").read_text(encoding="utf-8")
     )
+
+
+def test_run_local_kernel_rejects_a_symlinked_legacy_run_root(
+    tmp_path: Path,
+) -> None:
+    agent_root = tmp_path / "agent-root"
+    external_root = tmp_path / "external-run"
+    external_root.mkdir()
+    legacy_runs_root = agent_root / "vibe" / "runs"
+    legacy_runs_root.mkdir(parents=True)
+    _create_symlink_or_skip(legacy_runs_root / "linked-run", external_root)
+
+    with pytest.raises(ValueError, match="legacy run path must not contain symlinks"):
+        run_local_kernel(
+            agent_root=agent_root,
+            prompt="Do not follow the legacy run link.",
+            run_id="linked-run",
+            execute=False,
+        )
+
+    assert not (external_root / "task-card.json").exists()
+
+
+def test_run_local_kernel_rejects_symlinked_files_inside_a_legacy_run(
+    tmp_path: Path,
+) -> None:
+    agent_root = tmp_path / "agent-root"
+    legacy_run_root = agent_root / "vibe" / "runs" / "linked-file-run"
+    legacy_run_root.mkdir(parents=True)
+    external_file = tmp_path / "external.txt"
+    external_file.write_text("external", encoding="utf-8")
+    _create_symlink_or_skip(legacy_run_root / "linked.txt", external_file)
+
+    with pytest.raises(ValueError, match="run artifact trees must not contain symlinks"):
+        run_local_kernel(
+            agent_root=agent_root,
+            prompt="Do not copy linked legacy files.",
+            run_id="linked-file-run",
+            execute=False,
+        )
+
+    canonical_root = agent_root / ".vibeskills" / "runs" / "linked-file-run"
+    assert not (canonical_root / "linked.txt").exists()
 
 
 def test_inspect_local_run_does_not_use_legacy_fallback_for_explicit_workspace(
