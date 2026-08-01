@@ -225,7 +225,7 @@ def aggregate_proofs(
         _artifact_digest(path, root) for path in existing_proof_paths
     ]
     aggregate_artifacts.extend(
-        _artifact_digest(_resolve_path(path, root), root) for path in artifact_paths
+        _command_artifact(_resolve_path(path, root), root) for path in artifact_paths
     )
     for proof in proofs:
         for artifact in proof.get("artifacts") or []:
@@ -250,6 +250,7 @@ def aggregate_proofs(
     overall_result = "PASS" if (
         proofs
         and not absent_proofs
+        and not missing_artifacts
         and all(
             proof.get("result") == "PASS" and proof.get("exit_code") == 0
             for proof in proofs

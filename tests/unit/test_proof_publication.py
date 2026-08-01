@@ -195,6 +195,32 @@ def test_aggregate_proofs_generates_failure_state_when_every_input_is_absent(
     ]
 
 
+def test_aggregate_proofs_records_missing_declared_artifacts(
+    tmp_path: Path,
+) -> None:
+    proof_path = tmp_path / "passing.json"
+    run_command(
+        repo_root=tmp_path,
+        command=[sys.executable, "-c", "print('pass')"],
+        output_path=proof_path,
+        commit_sha="abc123",
+    )
+
+    outputs = aggregate_proofs(
+        repo_root=tmp_path,
+        proof_paths=[proof_path],
+        artifact_paths=["missing-contract.json"],
+        output_directory="published",
+    )
+
+    bundle = json.loads(outputs["proof_bundle"].read_text(encoding="utf-8"))
+    assert bundle["result"] == "FAIL"
+    assert bundle["absent_proofs"] == []
+    assert bundle["missing_artifacts"] == [
+        {"path": "missing-contract.json", "missing": True}
+    ]
+
+
 def test_aggregate_proofs_rejects_empty_and_mixed_commit_inputs(
     tmp_path: Path,
 ) -> None:
