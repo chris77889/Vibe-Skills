@@ -133,8 +133,8 @@ if ([string]::IsNullOrWhiteSpace($RunId)) {
     $RunId = New-VibeRunId
 }
 
-$sessionRoot = Ensure-VibeSessionRoot -RepoRoot $runtime.repo_root -RunId $RunId -Runtime $runtime -ArtifactRoot $ArtifactRoot
 $artifactContract = Get-VibeArtifactContractDescriptor -RepoRoot $runtime.repo_root -RunId $RunId -WorkspaceRoot $WorkspaceRoot -ArtifactRoot $ArtifactRoot
+$sessionRoot = Ensure-VibeSessionRoot -RepoRoot $runtime.repo_root -RunId $RunId -Runtime $runtime -ArtifactRoot $ArtifactRoot
 $hierarchyState = Get-VibeHierarchyState `
     -GovernanceScope $GovernanceScope `
     -RunId $RunId `
@@ -174,11 +174,7 @@ $legacyDocumentationWrite = [bool](
     -not $isChildScope -and
     [string]$artifactContract.legacy_write_mode -eq 'dual_write'
 )
-$publishedRequirementPath = if ($legacyDocumentationWrite) {
-    $docPath
-} else {
-    $primaryRequirementPath
-}
+$publishedRequirementPath = $primaryRequirementPath
 $antiDriftDraft = New-VgoAntiProxyGoalDriftDraft -PrimaryObjective $intentContract.goal
 $productAcceptanceCriteria = Get-VibeProductAcceptanceCriteria -IntentContract $intentContract
 $completionLanguagePolicy = Get-VibeCompletionLanguagePolicy

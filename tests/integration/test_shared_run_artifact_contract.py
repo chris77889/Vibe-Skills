@@ -14,6 +14,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CONTRACTS_SRC = REPO_ROOT / "packages" / "contracts" / "src"
 RUNTIME_SRC = REPO_ROOT / "packages" / "runtime-core" / "src"
+RUNTIME_INVOCATION_TIMEOUT_SECONDS = 120
 for source_root in (CONTRACTS_SRC, RUNTIME_SRC):
     if str(source_root) not in sys.path:
         sys.path.insert(0, str(source_root))
@@ -55,6 +56,7 @@ def _run_powershell_json(script: str) -> dict[str, object]:
         encoding="utf-8",
         errors="replace",
         check=True,
+        timeout=RUNTIME_INVOCATION_TIMEOUT_SECONDS,
     )
     payload = json.loads(completed.stdout)
     assert isinstance(payload, dict)
@@ -194,6 +196,44 @@ def test_python_and_powershell_follow_custom_contract_paths(tmp_path: Path) -> N
         ) == python_projection.primary_document_paths[kind]
 
 
+def test_repository_contract_overrides_a_conflicting_workspace_copy(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    config_root = workspace / "config"
+    config_root.mkdir(parents=True)
+    payload = json.loads(
+        (REPO_ROOT / "config" / "live-document-contract.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    payload["artifact_sink"]["root"] = ".workspace-contract/runs"
+    (config_root / "live-document-contract.json").write_text(
+        json.dumps(payload, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+    projection = resolve_runtime_artifact_projection(
+        agent_root=workspace,
+        workspace_root=workspace,
+        run_id="repo-contract-authority",
+        repo_root=REPO_ROOT,
+    )
+    powershell_projection = _run_powershell_json(
+        _dot_source_common()
+        + "$result = Get-VibeArtifactContractDescriptor "
+        + f"-RepoRoot {_ps_quote(REPO_ROOT)} -RunId 'repo-contract-authority' "
+        + f"-WorkspaceRoot {_ps_quote(workspace)}; "
+        + "$result | ConvertTo-Json -Depth 20"
+    )
+
+    expected_root = (
+        workspace / ".vibeskills" / "runs" / "repo-contract-authority"
+    ).resolve()
+    assert projection.run_root == expected_root
+    assert Path(str(powershell_projection["artifact_root"])) == expected_root
+
+
 def test_python_and_powershell_emit_manifest_and_artifact_envelope_parity(tmp_path: Path) -> None:
     run_id = "artifact-payload-parity"
     python_workspace = tmp_path / "python"
@@ -302,6 +342,7 @@ def test_historical_documentation_roots_are_rejected_as_artifact_workspaces(tmp_
         encoding="utf-8",
         errors="replace",
         check=False,
+        timeout=RUNTIME_INVOCATION_TIMEOUT_SECONDS,
     )
     assert completed.returncode != 0
     assert "historical documentation roots" in completed.stderr
@@ -385,6 +426,7 @@ def test_powershell_primary_documents_use_the_run_sink_and_report_dual_writes(
         errors="replace",
         env=env,
         check=True,
+        timeout=RUNTIME_INVOCATION_TIMEOUT_SECONDS,
     )
 
     run_root = workspace / ".vibeskills" / "runs" / run_id
@@ -399,6 +441,12 @@ def test_powershell_primary_documents_use_the_run_sink_and_report_dual_writes(
     summary = json.loads(
         (session_root / "runtime-summary.json").read_text(encoding="utf-8")
     )
+    requirement_receipt = json.loads(
+        (session_root / "requirement-doc-receipt.json").read_text(encoding="utf-8")
+    )
+    plan_receipt = json.loads(
+        (session_root / "execution-plan-receipt.json").read_text(encoding="utf-8")
+    )
     primary_requirement = run_root / "requirement.md"
     primary_plan = run_root / "plan.md"
     legacy_requirement = Path(summary["artifacts"]["legacy_requirement_doc"])
@@ -410,6 +458,11 @@ def test_powershell_primary_documents_use_the_run_sink_and_report_dual_writes(
     assert primary_plan.read_bytes() == legacy_plan.read_bytes()
     assert legacy_requirement.is_relative_to(workspace / "docs" / "requirements")
     assert legacy_plan.is_relative_to(workspace / "docs" / "plans")
+    assert Path(requirement_receipt["requirement_doc_path"]) == primary_requirement
+    assert Path(requirement_receipt["legacy_requirement_doc_path"]) == legacy_requirement
+    assert Path(plan_receipt["requirement_doc_path"]) == primary_requirement
+    assert Path(plan_receipt["execution_plan_path"]) == primary_plan
+    assert Path(plan_receipt["legacy_execution_plan_path"]) == legacy_plan
 
     manifest = json.loads((run_root / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["legacy_compatibility"] == {
@@ -435,6 +488,53 @@ def test_powershell_primary_documents_use_the_run_sink_and_report_dual_writes(
     assert module_work_plan["requirement_digest"] == hashlib.sha256(
         primary_requirement.read_bytes()
     ).hexdigest()
+
+
+def test_invalid_run_id_is_rejected_before_the_session_directory_is_created(
+    tmp_path: Path,
+) -> None:
+    artifact_root = tmp_path / "artifacts"
+    result = _run_powershell_json(
+        _dot_source_common()
+        + f"$artifactRoot = {_ps_quote(artifact_root)}; "
+        + "$runId = '../escape'; "
+        + "$unsafePath = [System.IO.Path]::GetFullPath((Join-Path $artifactRoot "
+        + "('outputs\\runtime\\vibe-sessions\\{0}' -f $runId))); "
+        + "$errorMessage = ''; "
+        + "try { Ensure-VibeSessionRoot "
+        + f"-RepoRoot {_ps_quote(REPO_ROOT)} -RunId $runId "
+        + "-ArtifactRoot $artifactRoot | Out-Null } "
+        + "catch { $errorMessage = $_.Exception.Message }; "
+        + "[pscustomobject]@{ "
+        + "error = $errorMessage; "
+        + "unsafe_path_exists = (Test-Path -LiteralPath $unsafePath) "
+        + "} | ConvertTo-Json"
+    )
+
+    assert result["error"] == "run id must be a safe path segment."
+    assert result["unsafe_path_exists"] is False
+
+
+def test_session_artifact_sync_rejects_overlapping_roots(tmp_path: Path) -> None:
+    session_root = tmp_path / "session"
+    run_root = session_root / "nested-run"
+    result = _run_powershell_json(
+        _dot_source_common()
+        + f"$sessionRoot = {_ps_quote(session_root)}; "
+        + f"$runRoot = {_ps_quote(run_root)}; "
+        + "New-Item -ItemType Directory -Path $sessionRoot -Force | Out-Null; "
+        + "Set-Content -LiteralPath (Join-Path $sessionRoot 'source.txt') "
+        + "-Value 'source'; "
+        + "$descriptor = [pscustomobject]@{ paths = [pscustomobject]@{} }; "
+        + "Sync-VibeSessionArtifactsToRunRoot "
+        + "-SessionRoot $sessionRoot -RunArtifactRoot $runRoot "
+        + "-ArtifactDescriptor $descriptor; "
+        + "[pscustomobject]@{ destination_exists = "
+        + "(Test-Path -LiteralPath (Join-Path $runRoot 'source.txt')) } "
+        + "| ConvertTo-Json"
+    )
+
+    assert result["destination_exists"] is False
 
 
 @pytest.mark.parametrize(
@@ -489,6 +589,7 @@ def test_python_and_powershell_reject_incomplete_artifact_contracts(
         errors="replace",
         env=os.environ.copy(),
         check=False,
+        timeout=RUNTIME_INVOCATION_TIMEOUT_SECONDS,
     )
     assert completed.returncode != 0
     assert field in completed.stderr
@@ -541,6 +642,7 @@ def test_python_and_powershell_reject_invalid_required_metadata(
         errors="replace",
         env=os.environ.copy(),
         check=False,
+        timeout=RUNTIME_INVOCATION_TIMEOUT_SECONDS,
     )
     assert completed.returncode != 0
     assert "required_metadata" in completed.stderr
@@ -586,6 +688,7 @@ def test_python_and_powershell_reject_unsupported_artifact_kinds(
         errors="replace",
         env=os.environ.copy(),
         check=False,
+        timeout=RUNTIME_INVOCATION_TIMEOUT_SECONDS,
     )
     assert completed.returncode != 0
     assert "unsupported" in completed.stderr

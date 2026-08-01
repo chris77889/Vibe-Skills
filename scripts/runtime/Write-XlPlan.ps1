@@ -123,8 +123,8 @@ if ([string]::IsNullOrWhiteSpace($RunId)) {
     $RunId = New-VibeRunId
 }
 
-$sessionRoot = Ensure-VibeSessionRoot -RepoRoot $runtime.repo_root -RunId $RunId -Runtime $runtime -ArtifactRoot $ArtifactRoot
 $artifactContract = Get-VibeArtifactContractDescriptor -RepoRoot $runtime.repo_root -RunId $RunId -WorkspaceRoot $WorkspaceRoot -ArtifactRoot $ArtifactRoot
+$sessionRoot = Ensure-VibeSessionRoot -RepoRoot $runtime.repo_root -RunId $RunId -Runtime $runtime -ArtifactRoot $ArtifactRoot
 $hierarchyState = Get-VibeHierarchyState `
     -GovernanceScope $GovernanceScope `
     -RunId $RunId `
@@ -215,13 +215,11 @@ $legacyDocumentationWrite = [bool](
     -not $isChildScope -and
     [string]$artifactContract.legacy_write_mode -eq 'dual_write'
 )
-$publishedPlanPath = if ($legacyDocumentationWrite) {
-    $planPath
-} else {
-    $primaryPlanPath
-}
+$publishedPlanPath = $primaryPlanPath
 $requirementPath = if (-not [string]::IsNullOrWhiteSpace($RequirementDocPath)) {
     $RequirementDocPath
+} elseif (-not $isChildScope) {
+    [string]$artifactContract.paths.primary_requirement
 } else {
     Get-VibeRequirementDocPath `
         -RepoRoot $runtime.repo_root `

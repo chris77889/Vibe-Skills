@@ -19,6 +19,7 @@ from vgo_runtime.artifact_contract import (
     load_runtime_artifact_manifest,
     mirror_legacy_run_if_needed,
     resolve_runtime_artifact_projection,
+    seed_canonical_run_from_legacy_if_needed,
     write_runtime_artifact_bundle,
 )
 
@@ -920,6 +921,7 @@ def run_local_kernel(
         run_id=resolved_run_id,
         repo_root=_repo_root(),
     )
+    seed_canonical_run_from_legacy_if_needed(artifact_projection)
     run_root = artifact_projection.run_root
     task_card_path = run_root / "task-card.json"
     plan_path = run_root / "plan.json"
@@ -1290,7 +1292,11 @@ def inspect_local_run(
     run_root = projection.run_root
     requested_run_root = run_root
     artifact_resolution_mode = "canonical"
-    if not (run_root / "work-dossier.json").is_file() and projection.legacy_run_root.is_dir():
+    if (
+        projection.legacy_projection_enabled
+        and not (run_root / "work-dossier.json").is_file()
+        and projection.legacy_run_root.is_dir()
+    ):
         # Read-only compatibility for runs created before the shared contract.
         run_root = projection.legacy_run_root
         artifact_resolution_mode = "legacy_projection"
@@ -1312,6 +1318,12 @@ def inspect_local_run(
             key=lambda candidate: str(candidate),
         )
         if sibling_candidates:
+            if len(sibling_candidates) > 1:
+                raise ValueError(
+                    "run_id resolves to several workspace run sinks; pass "
+                    "workspace_root: "
+                    + ", ".join(str(candidate) for candidate in sibling_candidates)
+                )
             run_root = sibling_candidates[0]
             artifact_resolution_mode = "sibling_contract_sink"
     skills_catalog_path = run_root / "skills-catalog.json"

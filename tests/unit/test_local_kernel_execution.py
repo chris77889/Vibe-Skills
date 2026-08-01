@@ -537,6 +537,85 @@ def test_inspect_local_run_reads_the_observable_legacy_projection(
     }
 
 
+def test_run_local_kernel_resumes_a_legacy_projection_in_the_canonical_sink(
+    tmp_path: Path,
+) -> None:
+    agent_root = tmp_path / "agent-root"
+    first = run_local_kernel(
+        agent_root=agent_root,
+        prompt="Review the runtime redesign and produce review notes.",
+        run_id="legacy-resume",
+        execute=False,
+    )
+    canonical_root = Path(str(first["artifact_root"]))
+    legacy_root = Path(str(first["legacy_run_root"]))
+    shutil.rmtree(canonical_root)
+
+    resumed = run_local_kernel(
+        agent_root=agent_root,
+        prompt="Continue by adding focused tests and verification evidence.",
+        run_id="legacy-resume",
+        execute=False,
+    )
+
+    assert resumed["task_card"]["goal"] == first["task_card"]["goal"]
+    assert resumed["task_card"]["initial_goal"] == first["task_card"]["initial_goal"]
+    assert resumed["work_summary"]["continuation_mode"] == "revised"
+    assert resumed["work_summary"]["accepted_revision_count"] == 1
+    assert canonical_root.is_dir()
+    assert json.loads((canonical_root / "task-card.json").read_text(encoding="utf-8")) == json.loads(
+        (legacy_root / "task-card.json").read_text(encoding="utf-8")
+    )
+
+
+def test_inspect_local_run_does_not_use_legacy_fallback_for_explicit_workspace(
+    tmp_path: Path,
+) -> None:
+    agent_root = tmp_path / "agent-root"
+    result = run_local_kernel(
+        agent_root=agent_root,
+        prompt="Record one compatibility artifact.",
+        run_id="workspace-isolated-legacy-run",
+        execute=False,
+    )
+    shutil.rmtree(Path(str(result["artifact_root"])))
+    explicit_workspace = tmp_path / "other-workspace"
+
+    with pytest.raises(ValueError, match="missing run artifact") as exc_info:
+        inspect_local_run(
+            agent_root=agent_root,
+            run_id="workspace-isolated-legacy-run",
+            workspace_root=explicit_workspace,
+        )
+
+    assert str(explicit_workspace.resolve()) in str(exc_info.value)
+
+
+def test_inspect_local_run_rejects_ambiguous_sibling_workspace_runs(
+    tmp_path: Path,
+) -> None:
+    agent_root = tmp_path / "agent-root"
+    workspace_a = tmp_path / "workspace-a"
+    workspace_b = tmp_path / "workspace-b"
+    for workspace in (workspace_a, workspace_b):
+        run_local_kernel(
+            agent_root=agent_root,
+            workspace_root=workspace,
+            prompt=f"Record the run for {workspace.name}.",
+            run_id="ambiguous-sibling-run",
+            execute=False,
+        )
+
+    with pytest.raises(ValueError, match="several workspace run sinks") as exc_info:
+        inspect_local_run(
+            agent_root=agent_root,
+            run_id="ambiguous-sibling-run",
+        )
+
+    assert str(workspace_a.resolve()) in str(exc_info.value)
+    assert str(workspace_b.resolve()) in str(exc_info.value)
+
+
 def test_run_local_kernel_writes_host_aware_skills_catalog_artifact(tmp_path: Path) -> None:
     agent_root = tmp_path / "skills"
     workspace_root = tmp_path / "workspace"

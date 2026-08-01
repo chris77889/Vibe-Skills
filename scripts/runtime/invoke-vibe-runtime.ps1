@@ -657,6 +657,11 @@ if (-not [string]::IsNullOrWhiteSpace($ModuleExecutionJsonFile)) {
         -not [string]::IsNullOrWhiteSpace([string]$requirementReceipt.primary_requirement_path)
     ) {
         [string]$requirementReceipt.primary_requirement_path
+    } elseif (
+        $requirementReceipt.PSObject.Properties.Name -contains 'requirement_doc_path' -and
+        -not [string]::IsNullOrWhiteSpace([string]$requirementReceipt.requirement_doc_path)
+    ) {
+        [string]$requirementReceipt.requirement_doc_path
     } else {
         [string]$executionPlanReceipt.requirement_doc_path
     }

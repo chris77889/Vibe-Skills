@@ -2589,6 +2589,18 @@ function Resolve-VibeContractWorkspaceRoot {
     return $resolved
 }
 
+function Resolve-VibeSafeRunId {
+    param(
+        [Parameter(Mandatory)] [string]$RunId
+    )
+
+    $normalizedRunId = $RunId.Trim()
+    if ([string]::IsNullOrWhiteSpace($normalizedRunId) -or $normalizedRunId -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*$') {
+        throw 'run id must be a safe path segment.'
+    }
+    return $normalizedRunId
+}
+
 function Get-VibeRunArtifactRoot {
     param(
         [Parameter(Mandatory)] [string]$RepoRoot,
@@ -2597,10 +2609,7 @@ function Get-VibeRunArtifactRoot {
         [AllowEmptyString()] [string]$ArtifactRoot = ''
     )
 
-    $normalizedRunId = $RunId.Trim()
-    if ([string]::IsNullOrWhiteSpace($normalizedRunId) -or $normalizedRunId -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*$') {
-        throw 'run id must be a safe path segment.'
-    }
+    $normalizedRunId = Resolve-VibeSafeRunId -RunId $RunId
     $contract = Get-VibeLiveGovernanceContract -RepoRoot $RepoRoot
     $contractWorkspaceRoot = Resolve-VibeContractWorkspaceRoot -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -ArtifactRoot $ArtifactRoot
     $separator = [string][System.IO.Path]::DirectorySeparatorChar
@@ -2809,7 +2818,15 @@ function Sync-VibeSessionArtifactsToRunRoot {
 
     $resolvedSessionRoot = [System.IO.Path]::GetFullPath($SessionRoot)
     $resolvedRunRoot = [System.IO.Path]::GetFullPath($RunArtifactRoot)
-    if ($resolvedSessionRoot -eq $resolvedRunRoot -or -not (Test-Path -LiteralPath $resolvedSessionRoot -PathType Container)) {
+    $separator = [string][System.IO.Path]::DirectorySeparatorChar
+    $sessionPrefix = $resolvedSessionRoot.TrimEnd('\', '/') + $separator
+    $runPrefix = $resolvedRunRoot.TrimEnd('\', '/') + $separator
+    $rootsOverlap = (
+        $resolvedSessionRoot -eq $resolvedRunRoot -or
+        $resolvedSessionRoot.StartsWith($runPrefix, [System.StringComparison]::OrdinalIgnoreCase) -or
+        $resolvedRunRoot.StartsWith($sessionPrefix, [System.StringComparison]::OrdinalIgnoreCase)
+    )
+    if ($rootsOverlap -or -not (Test-Path -LiteralPath $resolvedSessionRoot -PathType Container)) {
         return
     }
     $reservedPaths = @(
@@ -4892,8 +4909,9 @@ function Get-VibeSessionRoot {
         [AllowEmptyString()] [string]$ArtifactRoot = ''
     )
 
+    $normalizedRunId = Resolve-VibeSafeRunId -RunId $RunId
     $baseRoot = Get-VibeArtifactRoot -RepoRoot $RepoRoot -Runtime $Runtime -WorkspaceRoot $WorkspaceRoot -ArtifactRoot $ArtifactRoot
-    return [System.IO.Path]::GetFullPath((Join-Path $baseRoot ("outputs\runtime\vibe-sessions\{0}" -f $RunId)))
+    return [System.IO.Path]::GetFullPath((Join-Path $baseRoot ("outputs\runtime\vibe-sessions\{0}" -f $normalizedRunId)))
 }
 
 function Ensure-VibeSessionRoot {
@@ -5732,7 +5750,9 @@ function Get-VibeRequirementDocPath {
     $contract = Get-VibeLiveGovernanceContract -RepoRoot $RepoRoot
     $workspaceRoot = Resolve-VibeContractWorkspaceRoot -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -ArtifactRoot $ArtifactRoot
     $legacyRoot = @($contract.artifact_sink.legacy_documentation_roots)[0]
-    return [System.IO.Path]::GetFullPath((Join-Path $workspaceRoot (([string]$legacyRoot).Replace('/', '\') + "\{0}-{1}.md" -f $date, $slug)))
+    $separator = [string][System.IO.Path]::DirectorySeparatorChar
+    $legacyRootPath = Join-Path $workspaceRoot ([string]$legacyRoot).Replace('/', $separator)
+    return [System.IO.Path]::GetFullPath((Join-Path $legacyRootPath ("{0}-{1}.md" -f $date, $slug)))
 }
 
 function Get-VibeExecutionPlanPath {
@@ -5748,7 +5768,9 @@ function Get-VibeExecutionPlanPath {
     $contract = Get-VibeLiveGovernanceContract -RepoRoot $RepoRoot
     $workspaceRoot = Resolve-VibeContractWorkspaceRoot -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -ArtifactRoot $ArtifactRoot
     $legacyRoot = @($contract.artifact_sink.legacy_documentation_roots)[1]
-    return [System.IO.Path]::GetFullPath((Join-Path $workspaceRoot (([string]$legacyRoot).Replace('/', '\') + "\{0}-{1}-execution-plan.md" -f $date, $slug)))
+    $separator = [string][System.IO.Path]::DirectorySeparatorChar
+    $legacyRootPath = Join-Path $workspaceRoot ([string]$legacyRoot).Replace('/', $separator)
+    return [System.IO.Path]::GetFullPath((Join-Path $legacyRootPath ("{0}-{1}-execution-plan.md" -f $date, $slug)))
 }
 
 function Get-VibeRuntimeInputPacketPath {

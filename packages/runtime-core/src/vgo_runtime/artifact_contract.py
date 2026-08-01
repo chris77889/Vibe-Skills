@@ -46,25 +46,13 @@ class RuntimeArtifactProjection:
         return (Path(self.artifact_sink.root) / self.run_id).as_posix()
 
 
-def _load_contract(repo_root: Path, workspace_root: Path) -> LiveGovernanceContract:
-    # The repository contract is the executable authority. A workspace-local
-    # copy is accepted for isolated tests and downstream packaged workspaces.
-    candidates = (workspace_root, repo_root)
-    errors: list[str] = []
-    seen: set[Path] = set()
-    for candidate in candidates:
-        resolved = candidate.resolve()
-        if resolved in seen:
-            continue
-        seen.add(resolved)
-        try:
-            return load_live_governance_contract(resolved)
-        except (FileNotFoundError, RuntimeError, ValueError) as exc:
-            errors.append(str(exc))
-    raise RuntimeError(
-        "live governance artifact contract is required; "
-        + (errors[-1] if errors else "contract could not be loaded")
-    )
+def _load_contract(repo_root: Path) -> LiveGovernanceContract:
+    try:
+        return load_live_governance_contract(repo_root.resolve())
+    except (FileNotFoundError, RuntimeError, ValueError) as exc:
+        raise RuntimeError(
+            f"live governance artifact contract is required: {exc}"
+        ) from exc
 
 
 def resolve_runtime_artifact_projection(
@@ -79,7 +67,7 @@ def resolve_runtime_artifact_projection(
         workspace_root.resolve() if workspace_root is not None else resolved_agent_root
     )
     normalized_run_id = str(run_id).strip()
-    contract = _load_contract(repo_root.resolve(), resolved_workspace_root)
+    contract = _load_contract(repo_root.resolve())
     sink = contract.artifact_sink
     normalized_workspace = resolved_workspace_root.as_posix().rstrip("/").casefold()
     if any(
@@ -165,8 +153,9 @@ def _git_commit_sha(repo_root: Path) -> str:
             capture_output=True,
             text=True,
             check=True,
+            timeout=10,
         )
-    except (OSError, subprocess.CalledProcessError):
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
         return str(os.environ.get("VGO_COMMIT_SHA") or "unknown").strip() or "unknown"
     return completed.stdout.strip() or "unknown"
 
@@ -269,16 +258,40 @@ def write_runtime_artifact_bundle(
     return manifest
 
 
+def _copy_run_tree(*, source_root: Path, destination_root: Path) -> None:
+    destination_root.mkdir(parents=True, exist_ok=True)
+    for source in source_root.rglob("*"):
+        if not source.is_file():
+            continue
+        destination = destination_root / source.relative_to(source_root)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        copy2(source, destination)
+
+
 def _mirror_legacy_projection(projection: RuntimeArtifactProjection) -> None:
     if projection.legacy_run_root == projection.run_root:
         return
-    projection.legacy_run_root.mkdir(parents=True, exist_ok=True)
-    for source in projection.run_root.rglob("*"):
-        if not source.is_file():
-            continue
-        destination = projection.legacy_run_root / source.relative_to(projection.run_root)
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        copy2(source, destination)
+    _copy_run_tree(
+        source_root=projection.run_root,
+        destination_root=projection.legacy_run_root,
+    )
+
+
+def seed_canonical_run_from_legacy_if_needed(
+    projection: RuntimeArtifactProjection,
+) -> bool:
+    """Copy a pre-contract run into the canonical sink before resuming it."""
+    if (
+        not projection.legacy_projection_enabled
+        or projection.run_root.exists()
+        or not projection.legacy_run_root.is_dir()
+    ):
+        return False
+    _copy_run_tree(
+        source_root=projection.legacy_run_root,
+        destination_root=projection.run_root,
+    )
+    return True
 
 
 def mirror_legacy_run_if_needed(projection: RuntimeArtifactProjection) -> None:
@@ -308,5 +321,6 @@ __all__ = [
     "load_runtime_artifact_manifest",
     "mirror_legacy_run_if_needed",
     "resolve_runtime_artifact_projection",
+    "seed_canonical_run_from_legacy_if_needed",
     "write_runtime_artifact_bundle",
 ]
