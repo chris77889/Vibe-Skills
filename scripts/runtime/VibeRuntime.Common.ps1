@@ -2757,13 +2757,11 @@ function Write-VibeRunArtifactBundle {
         $envelope = New-VibeArtifactEnvelope -Kind $kind -RunId $normalizedRunId -Payload $payloads[$kind] -SchemaVersion ([int]$contract.artifact_sink.schema_version)
         Write-VibeJsonArtifact -Path $path -Value $envelope
     }
-    $isLinuxVariable = Get-Variable -Name IsLinux -ErrorAction SilentlyContinue
-    $isMacOsVariable = Get-Variable -Name IsMacOS -ErrorAction SilentlyContinue
-    $environmentOs = if ($env:OS -eq 'Windows_NT') {
+    $environmentOs = if ([System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([System.Runtime.InteropServices.OSPlatform]::Windows)) {
         'windows'
-    } elseif ($null -ne $isLinuxVariable -and [bool]$isLinuxVariable.Value) {
+    } elseif ([System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([System.Runtime.InteropServices.OSPlatform]::Linux)) {
         'linux'
-    } elseif ($null -ne $isMacOsVariable -and [bool]$isMacOsVariable.Value) {
+    } elseif ([System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([System.Runtime.InteropServices.OSPlatform]::OSX)) {
         'macos'
     } else {
         'unknown'

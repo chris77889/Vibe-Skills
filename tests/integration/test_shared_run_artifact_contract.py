@@ -260,6 +260,7 @@ def test_python_and_powershell_emit_manifest_and_artifact_envelope_parity(tmp_pa
     ).model_dump()
     powershell_result = _run_powershell_json(
         _dot_source_common()
+        + "Remove-Item Env:OS -ErrorAction SilentlyContinue; "
         + "$result = Write-VibeRunArtifactBundle "
         + f"-RepoRoot {_ps_quote(REPO_ROOT)} -RunId {_ps_quote(run_id)} "
         + f"-ArtifactRoot {_ps_quote(powershell_workspace)} -HostId 'codex' "
