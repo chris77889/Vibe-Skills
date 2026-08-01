@@ -838,6 +838,8 @@ def _resolve_markdown_link_targets(markdown: str, source: str) -> set[str]:
         match.group(1).strip() for match in _HTML_LINK_PATTERN.finditer(markdown)
     )
     for raw_destination in raw_destinations:
+        if not raw_destination:
+            continue
         if raw_destination.startswith("<") and ">" in raw_destination:
             raw_destination = raw_destination[1 : raw_destination.index(">")]
         else:

@@ -57,6 +57,8 @@ class PythonValidationContractTests(unittest.TestCase):
         self.assertIn("windows-latest", text)
         self.assertIn("test-baseline-audit.py --run-layer integration_host_boundary", text)
         self.assertIn("scripts/verify/live-document-gate.py", text)
+        self.assertIn('git cat-file -e "${BASE_SHA}^{commit}"', text)
+        self.assertIn("running workspace-only validation", text)
         self.assertIn("scripts/verify/publish-proof.py", text)
         self.assertIn("actions/upload-artifact@v4", text)
         self.assertIn("retention-days:", text)
@@ -78,6 +80,7 @@ class PythonValidationContractTests(unittest.TestCase):
         self.assertIn("touched_packaging_release", text)
         self.assertIn("integration_host_boundary", text)
         self.assertIn("touched_historical_governance", text)
+        self.assertIn("persist-credentials: false", text)
         self.assertNotIn("pull_request:", text)
         self.assertNotIn("push:", text)
 
@@ -95,6 +98,9 @@ class PythonValidationContractTests(unittest.TestCase):
         self.assertIn("gh release upload", text)
         self.assertIn("actions/upload-artifact@v4", text)
         self.assertIn("retention-days: 90", text)
+        self.assertIn("persist-credentials: false", text)
+        self.assertIn('if [ "${#targets[@]}" -eq 0 ]; then', text)
+        self.assertIn("canonical python validation target list is empty", text)
 
     def test_default_docs_entry_uses_live_state_sources(self) -> None:
         docs_text = DOCS_INDEX.read_text(encoding="utf-8-sig")

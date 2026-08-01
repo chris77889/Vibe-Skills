@@ -225,6 +225,21 @@ def test_live_document_workspace_rejects_missing_declared_stable_link(
         validate_live_document_workspace(contract, tmp_path)
 
 
+def test_live_document_workspace_treats_whitespace_links_as_missing(
+    tmp_path: Path,
+) -> None:
+    payload = _contract_payload()
+    for document in payload["documents"]:
+        text = "# Contract\n"
+        if document["path"] == "README.md":
+            text += "\n[Empty markdown link]( )\n<a href=\" \">Empty HTML link</a>\n"
+        _write(tmp_path / document["path"], text)
+    contract = LiveGovernanceContract.model_validate(payload)
+
+    with pytest.raises(ValueError, match="stable entry link is missing"):
+        validate_live_document_workspace(contract, tmp_path)
+
+
 def test_live_governance_contract_rejects_broad_document_exclusions() -> None:
     payload = _contract_payload()
     payload["excluded_prefixes"].append("docs/archive/")

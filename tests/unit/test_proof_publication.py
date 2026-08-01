@@ -5,13 +5,19 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 VERIFY_SRC = REPO_ROOT / "packages" / "verification-core" / "src"
 if str(VERIFY_SRC) not in sys.path:
     sys.path.insert(0, str(VERIFY_SRC))
 
-from vgo_verify.proof_publication import aggregate_proofs, run_command  # noqa: E402
+from vgo_verify.proof_publication import (  # noqa: E402
+    aggregate_proofs,
+    main,
+    run_command,
+)
 
 
 def _sha256(path: Path) -> str:
@@ -128,3 +134,113 @@ def test_aggregate_proofs_generates_bundle_and_current_state(tmp_path: Path) -> 
     )
     assert "Generated Current State" in current_state_markdown
     assert "FAIL" in current_state_markdown
+
+
+def test_aggregate_proofs_records_absent_inputs_and_generates_state(
+    tmp_path: Path,
+) -> None:
+    passing_path = tmp_path / "proofs" / "passing.json"
+    missing_path = tmp_path / "proofs" / "missing.json"
+    run_command(
+        repo_root=tmp_path,
+        command=[sys.executable, "-c", "print('pass')"],
+        output_path=passing_path,
+        commit_sha="abc123",
+        label="passing",
+    )
+
+    outputs = aggregate_proofs(
+        repo_root=tmp_path,
+        proof_paths=[passing_path, missing_path],
+        output_directory=tmp_path / "published",
+    )
+
+    bundle = json.loads(outputs["proof_bundle"].read_text(encoding="utf-8"))
+    current_state = json.loads(
+        outputs["current_state_json"].read_text(encoding="utf-8")
+    )
+    current_state_markdown = outputs["current_state_markdown"].read_text(
+        encoding="utf-8"
+    )
+    assert bundle["result"] == "FAIL"
+    assert bundle["absent_proofs"] == ["proofs/missing.json"]
+    assert any(
+        item.get("artifact_kind") == "command_proof" and item.get("missing")
+        for item in bundle["missing_artifacts"]
+    )
+    assert current_state["absent_proofs"] == ["proofs/missing.json"]
+    assert "Missing Proofs" in current_state_markdown
+    assert "proofs/missing.json" in current_state_markdown
+
+
+def test_aggregate_proofs_generates_failure_state_when_every_input_is_absent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GITHUB_SHA", "fedcba9876543210")
+
+    outputs = aggregate_proofs(
+        repo_root=tmp_path,
+        proof_paths=["proofs/first.json", "proofs/second.json"],
+        output_directory="published",
+    )
+
+    bundle = json.loads(outputs["proof_bundle"].read_text(encoding="utf-8"))
+    assert bundle["result"] == "FAIL"
+    assert bundle["commit_sha"] == "fedcba9876543210"
+    assert bundle["proofs"] == []
+    assert bundle["absent_proofs"] == [
+        "proofs/first.json",
+        "proofs/second.json",
+    ]
+
+
+def test_aggregate_proofs_rejects_empty_and_mixed_commit_inputs(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(ValueError, match="at least one command proof"):
+        aggregate_proofs(
+            repo_root=tmp_path,
+            proof_paths=[],
+            output_directory="published",
+        )
+
+    first_path = tmp_path / "first.json"
+    second_path = tmp_path / "second.json"
+    for path, commit_sha in ((first_path, "first"), (second_path, "second")):
+        run_command(
+            repo_root=tmp_path,
+            command=[sys.executable, "-c", "print('pass')"],
+            output_path=path,
+            commit_sha=commit_sha,
+        )
+    with pytest.raises(ValueError, match="same commit SHA"):
+        aggregate_proofs(
+            repo_root=tmp_path,
+            proof_paths=[first_path, second_path],
+            output_directory="published",
+        )
+
+
+def test_aggregate_cli_returns_nonzero_for_a_failed_bundle(tmp_path: Path) -> None:
+    proof_path = tmp_path / "failed.json"
+    run_command(
+        repo_root=tmp_path,
+        command=[sys.executable, "-c", "raise SystemExit(2)"],
+        output_path=proof_path,
+        commit_sha="abc123",
+    )
+
+    exit_code = main(
+        [
+            "aggregate",
+            "--repo-root",
+            str(tmp_path),
+            "--proof",
+            str(proof_path),
+            "--output-directory",
+            str(tmp_path / "published"),
+        ]
+    )
+
+    assert exit_code == 1

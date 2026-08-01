@@ -200,17 +200,29 @@ def aggregate_proofs(
     if not resolved_proof_paths:
         raise ValueError("proof aggregation requires at least one command proof")
     proofs: list[dict[str, Any]] = []
+    existing_proof_paths: list[Path] = []
+    absent_proofs: list[str] = []
     for path in resolved_proof_paths:
+        if not path.is_file():
+            absent_proofs.append(_display_path(path, root))
+            continue
         payload = json.loads(path.read_text(encoding="utf-8-sig"))
         if not isinstance(payload, dict) or payload.get("proof_kind") != "command":
             raise ValueError(f"unsupported command proof: {path}")
         proofs.append(payload)
-    commit_shas = {str(proof.get("commit_sha") or "").strip() for proof in proofs}
-    if "" in commit_shas or len(commit_shas) != 1:
-        raise ValueError("all command proofs must identify the same commit SHA")
+        existing_proof_paths.append(path)
+    if proofs:
+        commit_shas = {
+            str(proof.get("commit_sha") or "").strip() for proof in proofs
+        }
+        if "" in commit_shas or len(commit_shas) != 1:
+            raise ValueError("all command proofs must identify the same commit SHA")
+        commit_sha = next(iter(commit_shas))
+    else:
+        commit_sha = _resolve_commit_sha(root, None)
 
     aggregate_artifacts: list[dict[str, Any]] = [
-        _artifact_digest(path, root) for path in resolved_proof_paths
+        _artifact_digest(path, root) for path in existing_proof_paths
     ]
     aggregate_artifacts.extend(
         _artifact_digest(_resolve_path(path, root), root) for path in artifact_paths
@@ -220,7 +232,14 @@ def aggregate_proofs(
             if isinstance(artifact, dict):
                 aggregate_artifacts.append(dict(artifact))
     unique_artifacts: dict[tuple[str, str], dict[str, Any]] = {}
-    missing_artifacts: dict[str, dict[str, Any]] = {}
+    missing_artifacts: dict[str, dict[str, Any]] = {
+        path: {
+            "path": path,
+            "missing": True,
+            "artifact_kind": "command_proof",
+        }
+        for path in absent_proofs
+    }
     for artifact in aggregate_artifacts:
         if artifact.get("missing"):
             missing_artifacts[str(artifact.get("path") or "")] = artifact
@@ -228,9 +247,13 @@ def aggregate_proofs(
         key = (str(artifact.get("path") or ""), str(artifact.get("sha256") or ""))
         unique_artifacts[key] = artifact
 
-    overall_result = "PASS" if all(
-        proof.get("result") == "PASS" and proof.get("exit_code") == 0
-        for proof in proofs
+    overall_result = "PASS" if (
+        proofs
+        and not absent_proofs
+        and all(
+            proof.get("result") == "PASS" and proof.get("exit_code") == 0
+            for proof in proofs
+        )
     ) else "FAIL"
     output_root = _resolve_path(output_directory, root)
     proof_bundle_path = output_root / "proof-bundle.json"
@@ -241,8 +264,9 @@ def aggregate_proofs(
         "proof_kind": "bundle",
         "generated_at": _utc_now(),
         "result": overall_result,
-        "commit_sha": next(iter(commit_shas)),
+        "commit_sha": commit_sha,
         "proofs": proofs,
+        "absent_proofs": absent_proofs,
         "artifact_digests": list(unique_artifacts.values()),
         "missing_artifacts": list(missing_artifacts.values()),
     }
@@ -259,7 +283,7 @@ def aggregate_proofs(
         "schema_version": PROOF_SCHEMA_VERSION,
         "generated_at": _utc_now(),
         "result": overall_result,
-        "commit_sha": next(iter(commit_shas)),
+        "commit_sha": commit_sha,
         "commands": [
             {
                 "label": proof["command"]["label"],
@@ -268,6 +292,7 @@ def aggregate_proofs(
             }
             for proof in proofs
         ],
+        "absent_proofs": absent_proofs,
         "proof_bundle": _artifact_digest(proof_bundle_path, root),
         "links": links,
     }
@@ -286,6 +311,9 @@ def aggregate_proofs(
         f"- `{item['label']}`: **{item['result']}** (exit `{item['exit_code']}`)"
         for item in current_state["commands"]
     )
+    if absent_proofs:
+        markdown_lines.extend(["", "## Missing Proofs", ""])
+        markdown_lines.extend(f"- `{path}`" for path in absent_proofs)
     current_state_markdown_path.parent.mkdir(parents=True, exist_ok=True)
     current_state_markdown_path.write_text(
         "\n".join(markdown_lines) + "\n",
@@ -345,7 +373,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         artifact_paths=args.artifact,
     )
     print(json.dumps({key: value.as_posix() for key, value in outputs.items()}))
-    return 0
+    bundle = json.loads(outputs["proof_bundle"].read_text(encoding="utf-8"))
+    return 0 if bundle.get("result") == "PASS" else 1
 
 
 if __name__ == "__main__":  # pragma: no cover

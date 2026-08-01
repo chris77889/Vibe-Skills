@@ -65,7 +65,11 @@ jobs:
           python_bin="$(bash scripts/common/python_helpers.sh --print-supported-python 'Live document contract gate')"
           gate_args=(--repo-root .)
           if [[ -n "${BASE_SHA}" && ! "${BASE_SHA}" =~ ^0+$ ]]; then
-            gate_args+=(--base-ref "${BASE_SHA}" --head-ref "${HEAD_SHA}")
+            if git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+              gate_args+=(--base-ref "${BASE_SHA}" --head-ref "${HEAD_SHA}")
+            else
+              echo "base SHA ${BASE_SHA} is unavailable; running workspace-only validation" >&2
+            fi
           fi
           "${python_bin}" scripts/verify/publish-proof.py run \
             --repo-root . \

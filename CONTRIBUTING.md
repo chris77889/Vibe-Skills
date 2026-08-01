@@ -52,7 +52,7 @@ another maintained document in the same change.
 ## Do Not Edit These Surfaces Casually
 
 Do not directly edit these paths unless your change explicitly owns the plan and
-proof burden (see "When a Plan Is Mandatory" below):
+proof burden (see "When a Governed Run Is Mandatory" below):
 
 - `install.ps1`
 - `install.sh`
