@@ -20,10 +20,12 @@ from vgo_verify import test_baseline_audit as audit
 
 EXPECTED_LAYER_IDS = [
     "contract_unit",
+    "default_live_contracts",
     "default_install_lifecycle",
     "default_runtime_entry_truth",
     "default_routing_mainline",
     "touched_packaging_release",
+    "touched_historical_governance",
     "integration_host_boundary",
 ]
 
@@ -44,19 +46,23 @@ class TestBaselineAuditPolicyTests(unittest.TestCase):
         layers = {layer["id"]: layer for layer in policy["layers"]}
 
         for layer_id in (
+            "default_live_contracts",
             "default_install_lifecycle",
             "default_runtime_entry_truth",
             "default_routing_mainline",
             "touched_packaging_release",
+            "touched_historical_governance",
         ):
             pytest_args = layers[layer_id]["pytest_args"]
             self.assertTrue(pytest_args, layer_id)
             self.assertTrue(all(arg.endswith(".py") for arg in pytest_args), layer_id)
 
+        self.assertEqual("default_regression", layers["default_live_contracts"]["selection_scope"])
         self.assertEqual("default_regression", layers["default_install_lifecycle"]["selection_scope"])
         self.assertEqual("default_regression", layers["default_runtime_entry_truth"]["selection_scope"])
         self.assertEqual("default_regression", layers["default_routing_mainline"]["selection_scope"])
         self.assertEqual("touched_surface_only", layers["touched_packaging_release"]["selection_scope"])
+        self.assertEqual("touched_surface_only", layers["touched_historical_governance"]["selection_scope"])
         self.assertEqual("host_boundary", layers["integration_host_boundary"]["selection_scope"])
 
     def test_default_capability_layers_keep_file_serial_diagnostics(self) -> None:
@@ -64,10 +70,12 @@ class TestBaselineAuditPolicyTests(unittest.TestCase):
         layers = {layer["id"]: layer for layer in policy["layers"]}
 
         for layer_id in (
+            "default_live_contracts",
             "default_install_lifecycle",
             "default_runtime_entry_truth",
             "default_routing_mainline",
             "touched_packaging_release",
+            "touched_historical_governance",
         ):
             self.assertEqual("file_serial", layers[layer_id]["run_strategy"], layer_id)
             self.assertGreaterEqual(layers[layer_id]["per_file_timeout_seconds"], 300, layer_id)
@@ -118,7 +126,7 @@ class TestBaselineAuditPolicyTests(unittest.TestCase):
         policy = audit.load_policy(REPO_ROOT / "config" / "test-baseline-policy.json")
         commands = audit.build_collect_commands(policy)
 
-        self.assertEqual(6, len(commands))
+        self.assertEqual(8, len(commands))
         command_map = {
             tuple(item["source_layer_ids"]): item["command"]
             for item in commands
@@ -131,6 +139,8 @@ class TestBaselineAuditPolicyTests(unittest.TestCase):
         self.assertIn("tests/runtime_neutral/test_governed_runtime_bridge.py", command_map[("default_runtime_entry_truth",)])
         self.assertIn("tests/runtime_neutral/test_custom_admission_bridge.py", command_map[("default_routing_mainline",)])
         self.assertIn("tests/runtime_neutral/test_release_truth_gate.py", command_map[("touched_packaging_release",)])
+        self.assertIn("tests/runtime_neutral/test_live_document_contract_gate.py", command_map[("default_live_contracts",)])
+        self.assertIn("tests/runtime_neutral/test_current_routing_contract_scan.py", command_map[("touched_historical_governance",)])
         self.assertEqual(
             [
                 sys.executable,
@@ -210,21 +220,27 @@ class TestBaselineAuditPolicyTests(unittest.TestCase):
     def test_select_layer_files_returns_only_explicit_capability_targets(self) -> None:
         policy = audit.load_policy(REPO_ROOT / "config" / "test-baseline-policy.json")
         nodes = [
+            "tests/runtime_neutral/test_live_document_contract_gate.py::test_contract",
             "tests/runtime_neutral/test_install_profile_differentiation.py::test_profile",
             "tests/runtime_neutral/test_governed_runtime_bridge.py::test_bridge",
             "tests/runtime_neutral/test_custom_admission_bridge.py::test_bridge",
             "tests/runtime_neutral/test_pack_manifest_role_contract.py::test_manifest",
+            "tests/runtime_neutral/test_current_routing_contract_scan.py::test_history",
         ]
 
+        live_files = audit.select_layer_files(nodes, REPO_ROOT, policy, "default_live_contracts")
         install_files = audit.select_layer_files(nodes, REPO_ROOT, policy, "default_install_lifecycle")
         runtime_files = audit.select_layer_files(nodes, REPO_ROOT, policy, "default_runtime_entry_truth")
         routing_files = audit.select_layer_files(nodes, REPO_ROOT, policy, "default_routing_mainline")
         packaging_files = audit.select_layer_files(nodes, REPO_ROOT, policy, "touched_packaging_release")
+        historical_files = audit.select_layer_files(nodes, REPO_ROOT, policy, "touched_historical_governance")
 
+        self.assertEqual(["tests/runtime_neutral/test_live_document_contract_gate.py"], live_files)
         self.assertEqual(["tests/runtime_neutral/test_install_profile_differentiation.py"], install_files)
         self.assertEqual(["tests/runtime_neutral/test_governed_runtime_bridge.py"], runtime_files)
         self.assertEqual(["tests/runtime_neutral/test_custom_admission_bridge.py"], routing_files)
         self.assertEqual(["tests/runtime_neutral/test_pack_manifest_role_contract.py"], packaging_files)
+        self.assertEqual(["tests/runtime_neutral/test_current_routing_contract_scan.py"], historical_files)
 
     def test_run_collect_commands_reports_layer_context_on_timeout(self) -> None:
         policy = {
@@ -280,10 +296,12 @@ class TestBaselineAuditPolicyTests(unittest.TestCase):
         policy = audit.load_policy(REPO_ROOT / "config" / "test-baseline-policy.json")
         nodes = [
             "tests/unit/test_vgo_verify_repo.py::test_repo_root",
+            "tests/runtime_neutral/test_live_document_contract_gate.py::test_contract",
             "tests/runtime_neutral/test_install_profile_differentiation.py::test_profile",
             "tests/runtime_neutral/test_governed_runtime_bridge.py::test_bridge",
             "tests/runtime_neutral/test_custom_admission_bridge.py::test_bridge",
             "tests/runtime_neutral/test_pack_manifest_role_contract.py::test_manifest",
+            "tests/runtime_neutral/test_current_routing_contract_scan.py::test_history",
             "tests/integration/test_install_rerun_matrix.py::test_build_install_plan_preserves_rerun_semantics",
         ]
 
@@ -296,18 +314,22 @@ class TestBaselineAuditPolicyTests(unittest.TestCase):
             run_result=None,
         )
 
-        self.assertEqual(6, artifact["summary"]["total_nodes"])
+        self.assertEqual(8, artifact["summary"]["total_nodes"])
         self.assertEqual(0, artifact["summary"]["risk_tag_count"])
         self.assertEqual({}, artifact["risks"])
         self.assertEqual("contract_support", artifact["layers"]["contract_unit"]["selection_scope"])
+        self.assertEqual("default_regression", artifact["layers"]["default_live_contracts"]["selection_scope"])
         self.assertEqual("default_regression", artifact["layers"]["default_install_lifecycle"]["selection_scope"])
         self.assertEqual("touched_surface_only", artifact["layers"]["touched_packaging_release"]["selection_scope"])
+        self.assertEqual("touched_surface_only", artifact["layers"]["touched_historical_governance"]["selection_scope"])
         self.assertEqual("host_boundary", artifact["layers"]["integration_host_boundary"]["selection_scope"])
         self.assertEqual(1, artifact["layers"]["contract_unit"]["node_count"])
+        self.assertEqual(1, artifact["layers"]["default_live_contracts"]["node_count"])
         self.assertEqual(1, artifact["layers"]["default_install_lifecycle"]["node_count"])
         self.assertEqual(1, artifact["layers"]["default_runtime_entry_truth"]["node_count"])
         self.assertEqual(1, artifact["layers"]["default_routing_mainline"]["node_count"])
         self.assertEqual(1, artifact["layers"]["touched_packaging_release"]["node_count"])
+        self.assertEqual(1, artifact["layers"]["touched_historical_governance"]["node_count"])
         self.assertEqual(1, artifact["layers"]["integration_host_boundary"]["node_count"])
 
     def test_write_artifacts_emits_json_and_markdown(self) -> None:
@@ -390,7 +412,7 @@ class TestBaselineAuditCliTests(unittest.TestCase):
         exit_code = audit.main(["--collect-only"], runner=runner)
 
         self.assertEqual(0, exit_code)
-        self.assertEqual(6, len(runner.calls))
+        self.assertEqual(8, len(runner.calls))
         self.assertTrue(all("--collect-only" in call["command"] for call in runner.calls))
         for call in runner.calls:
             env = call["kwargs"]["env"]
@@ -403,7 +425,7 @@ class TestBaselineAuditCliTests(unittest.TestCase):
         exit_code = audit.main(["--collect-only", "--run-layer", "contract_unit"], runner=runner)
 
         self.assertEqual(0, exit_code)
-        self.assertEqual(6, len(runner.calls))
+        self.assertEqual(8, len(runner.calls))
         self.assertTrue(all("--collect-only" in call["command"] for call in runner.calls))
 
     def test_run_layer_sets_disable_network_env(self) -> None:

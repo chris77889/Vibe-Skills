@@ -186,14 +186,24 @@ class RouterBridgeTests(unittest.TestCase):
             "Please use scikit-learn to prototype a tabular classification baseline, "
             "run feature selection, and compare cross-validation metrics."
         )
-        baseline = route_prompt(prompt=prompt, grade="L", task_type="coding", repo_root=REPO_ROOT)
-        wrapped = route_prompt(
-            prompt=prompt,
-            grade="L",
-            task_type="coding",
-            entry_intent_id="vibe",
-            repo_root=REPO_ROOT,
-        )
+        with tempfile.TemporaryDirectory() as tempdir:
+            target_root = Path(tempdir) / ".agents"
+            install_route_skills(target_root)
+            baseline = route_prompt(
+                prompt=prompt,
+                grade="L",
+                task_type="coding",
+                target_root=str(target_root),
+                repo_root=REPO_ROOT,
+            )
+            wrapped = route_prompt(
+                prompt=prompt,
+                grade="L",
+                task_type="coding",
+                entry_intent_id="vibe",
+                target_root=str(target_root),
+                repo_root=REPO_ROOT,
+            )
 
         self.assertEqual(baseline["route_mode"], wrapped["route_mode"])
         self.assertEqual(baseline["candidate_focus"]["pack_id"], wrapped["candidate_focus"]["pack_id"])

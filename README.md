@@ -37,9 +37,12 @@
 <br>
 
 <a href="./docs/quick-start.en.md">Quick start</a> ·
+<a href="https://github.com/foryourhealth111-pixel/Vibe-Skills/actions/workflows/vco-gates.yml">Current CI & proof</a> ·
 <a href="https://github.com/foryourhealth111-pixel/Vibe-Skills/releases/latest">Release notes</a> ·
 <a href="./docs/README.md">Documentation</a> ·
 <a href="https://github.com/foryourhealth111-pixel/Vibe-Skills/stargazers">Star the project</a>
+
+<p><code>pwsh ./check.ps1</code> reports the current local runtime state.</p>
 
 </div>
 

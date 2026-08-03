@@ -88,5 +88,5 @@ The order below is the current safe sequencing recommendation after the 2026-04-
 - current governed cleanup requirement lives in [`../requirements/2026-04-05-github-visible-docs-worklog-purge.md`](../requirements/2026-04-05-github-visible-docs-worklog-purge.md)
 - current governed cleanup plan lives in [`../plans/2026-04-05-github-visible-docs-worklog-purge-plan.md`](../plans/2026-04-05-github-visible-docs-worklog-purge-plan.md)
 - architecture sign-off proof lives in [`../proof/2026-04-04-owner-consumer-consistency-proof.md`](../proof/2026-04-04-owner-consumer-consistency-proof.md)
-- live runtime summary lives in [`current-state.md`](current-state.md)
+- live runtime summary is generated in [vco-gates artifacts](https://github.com/foryourhealth111-pixel/Vibe-Skills/actions/workflows/vco-gates.yml)
 - closure receipt lives in [`closure-audit.md`](closure-audit.md)

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-07-08",
+  "updated_at": "2026-08-01",
   "defaults": {
     "external_network_allowed": false,
     "disable_network_env": "VIBESKILLS_TEST_DISABLE_NETWORK",
@@ -15,6 +15,20 @@
       "pytest_args": ["tests/contract", "tests/unit"],
       "timeout_seconds": 180,
       "dependencies": ["python", "pytest"],
+      "external_network_allowed": false
+    },
+    {
+      "id": "default_live_contracts",
+      "description": "Executable live-document and shared run-artifact contract proof.",
+      "selection_scope": "default_regression",
+      "pytest_args": [
+        "tests/runtime_neutral/test_live_document_contract_gate.py",
+        "tests/integration/test_shared_run_artifact_contract.py"
+      ],
+      "timeout_seconds": 1800,
+      "run_strategy": "file_serial",
+      "per_file_timeout_seconds": 600,
+      "dependencies": ["python", "pytest", "powershell", "git"],
       "external_network_allowed": false
     },
     {
@@ -75,6 +89,20 @@
       "run_strategy": "file_serial",
       "per_file_timeout_seconds": 300,
       "dependencies": ["python", "pytest", "powershell", "bash", "git"],
+      "external_network_allowed": false
+    },
+    {
+      "id": "touched_historical_governance",
+      "description": "Historical-path census and stale-archive checks for explicitly touched governance history.",
+      "selection_scope": "touched_surface_only",
+      "pytest_args": [
+        "tests/runtime_neutral/test_current_routing_contract_scan.py",
+        "tests/runtime_neutral/test_retired_agent_execution_surfaces.py"
+      ],
+      "timeout_seconds": 1200,
+      "run_strategy": "file_serial",
+      "per_file_timeout_seconds": 300,
+      "dependencies": ["python", "pytest", "powershell", "git"],
       "external_network_allowed": false
     },
     {

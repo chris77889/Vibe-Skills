@@ -148,7 +148,8 @@ class RuntimeContractSchemaTests(unittest.TestCase):
                 "& { "
                 f". {ps_quote(str(RUNTIME_COMMON))}; "
                 "$path = Initialize-VibeWorkspaceProjectDescriptor "
-                f"-RepoRoot {ps_quote(str(workspace_root.resolve()))}; "
+                f"-RepoRoot {ps_quote(str(REPO_ROOT))} "
+                f"-WorkspaceRoot {ps_quote(str(workspace_root.resolve()))}; "
                 "$descriptor = Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json; "
                 "$descriptor | ConvertTo-Json -Depth 10 }"
             )

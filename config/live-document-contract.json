@@ -104,6 +104,45 @@
       "lifecycle": "live"
     }
   ],
+  "stable_entry_links": [
+    {
+      "source": "README.md",
+      "targets": [
+        "README.zh.md",
+        "CONTRIBUTING.md",
+        "docs/README.md"
+      ]
+    },
+    {
+      "source": "README.zh.md",
+      "targets": [
+        "README.md",
+        "CONTRIBUTING.md",
+        "docs/README.md"
+      ]
+    },
+    {
+      "source": "CONTRIBUTING.md",
+      "targets": [
+        "docs/README.md",
+        "docs/developer-change-governance.md",
+        "references/change-proof-matrix.md",
+        "references/developer-entry-contract.md"
+      ]
+    },
+    {
+      "source": "docs/README.md",
+      "targets": [
+        "docs/governance/README.md",
+        "docs/developer-change-governance.md"
+      ]
+    }
+  ],
+  "proof_retention": {
+    "pull_request_days": 30,
+    "main_and_scheduled_days": 90,
+    "formal_release": "github_release"
+  },
   "artifact_sink": {
     "schema_version": 1,
     "root": ".vibeskills/runs",

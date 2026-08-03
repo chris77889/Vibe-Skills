@@ -6,7 +6,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_english_readme_routes_internal_runtime_roles_to_the_architecture_docs() -> None:
+def test_english_readme_keeps_internal_runtime_roles_out_of_default_navigation() -> None:
     readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
     architecture = (
         REPO_ROOT / "docs" / "architecture" / "local-agent-kernel-v2.md"
@@ -27,8 +27,9 @@ def test_english_readme_routes_internal_runtime_roles_to_the_architecture_docs()
         "Do not let PowerShell own task semantics.",
     )
 
-    assert "[architecture guide](./docs/architecture/local-agent-kernel-v2.md)" in readme
-    assert "roles of Python and PowerShell" in readme
+    assert "[architecture guide](./docs/architecture/local-agent-kernel-v2.md)" not in readme
+    assert "roles of Python and PowerShell" not in readme
+    assert '<a href="./docs/README.md">Documentation</a>' in readme
 
     internal_phrases = (
         "canonical validation",
@@ -47,11 +48,12 @@ def test_english_readme_routes_internal_runtime_roles_to_the_architecture_docs()
             assert claim not in content
 
 
-def test_chinese_readme_routes_internal_runtime_roles_to_the_architecture_docs() -> None:
+def test_chinese_readme_keeps_internal_runtime_roles_out_of_default_navigation() -> None:
     content = (REPO_ROOT / "README.zh.md").read_text(encoding="utf-8")
 
-    assert "[架构说明](./docs/architecture/local-agent-kernel-v2.md)" in content
-    assert "Python 和 PowerShell 分别负责什么" in content
+    assert "[架构说明](./docs/architecture/local-agent-kernel-v2.md)" not in content
+    assert "Python 和 PowerShell 分别负责什么" not in content
+    assert '<a href="./docs/README.md">文档索引</a>' in content
 
     internal_phrases = (
         "canonical validation",

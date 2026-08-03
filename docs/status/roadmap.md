@@ -79,7 +79,7 @@ These tracks remain governed backlog, not active closure claims:
 - completed closure plan lives in [`../plans/2026-04-04-remaining-architecture-closure-plan.md`](../plans/2026-04-04-remaining-architecture-closure-plan.md)
 - active cleanup requirement lives in [`../requirements/2026-04-05-github-visible-docs-worklog-purge.md`](../requirements/2026-04-05-github-visible-docs-worklog-purge.md)
 - active cleanup plan lives in [`../plans/2026-04-05-github-visible-docs-worklog-purge-plan.md`](../plans/2026-04-05-github-visible-docs-worklog-purge-plan.md)
-- live runtime summary lives in [`current-state.md`](current-state.md)
+- live runtime summary is generated in [vco-gates artifacts](https://github.com/foryourhealth111-pixel/Vibe-Skills/actions/workflows/vco-gates.yml)
 - closure receipt lives in [`closure-audit.md`](closure-audit.md)
 - blocker map lives in [`path-dependency-census.md`](path-dependency-census.md)
 

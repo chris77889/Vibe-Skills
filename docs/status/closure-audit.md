@@ -22,7 +22,7 @@ It does **not** mean the repository has deleted every fallback or compatibility 
 - final proof-wave requirement: [`../requirements/2026-04-04-final-architecture-consistency-proof.md`](../requirements/2026-04-04-final-architecture-consistency-proof.md)
 - final proof-wave plan: [`../plans/2026-04-04-final-architecture-consistency-proof-plan.md`](../plans/2026-04-04-final-architecture-consistency-proof-plan.md)
 - owner -> consumer proof: [`../proof/2026-04-04-owner-consumer-consistency-proof.md`](../proof/2026-04-04-owner-consumer-consistency-proof.md)
-- live summary: [`current-state.md`](current-state.md)
+- live summary: [vco-gates artifacts](https://github.com/foryourhealth111-pixel/Vibe-Skills/actions/workflows/vco-gates.yml)
 
 ## Completed In The Active 2026-04-04 Track
 

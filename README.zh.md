@@ -37,9 +37,12 @@
 <br>
 
 <a href="./docs/quick-start.md">快速开始</a> ·
+<a href="https://github.com/foryourhealth111-pixel/Vibe-Skills/actions/workflows/vco-gates.yml">当前 CI 与 proof</a> ·
 <a href="https://github.com/foryourhealth111-pixel/Vibe-Skills/releases/latest">发布记录</a> ·
 <a href="./docs/README.md">文档索引</a> ·
 <a href="https://github.com/foryourhealth111-pixel/Vibe-Skills/stargazers">Star 项目</a>
+
+<p><code>pwsh ./check.ps1</code> 可查看当前本地运行时状态。</p>
 
 </div>
 

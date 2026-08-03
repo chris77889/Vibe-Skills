@@ -640,6 +640,7 @@ def test_check_command_uses_simplified_skills_dir_check(
     assert check_command(argparse.Namespace(repo_root=str(REPO_ROOT), skills_dir=str(skills_dir))) == 0
 
     output = capsys.readouterr().out
+    payload = json.loads(output)
     assert '"ok": true' in output
     assert '"scope": "installed_vibe_skill"' in output
     assert '"result": "passed"' in output
@@ -647,6 +648,12 @@ def test_check_command_uses_simplified_skills_dir_check(
     assert '"material skill execution"' in output
     assert '"runtime coherent"' in output
     assert '"delivery accepted"' in output
+    assert payload["current_state"]["local_runtime"]["result"] == "PASS"
+    assert payload["current_state"]["local_runtime"]["source"] == "installed_vibe_skill_receipt"
+    assert payload["current_state"]["ci"]["url"].endswith(
+        "/actions/workflows/vco-gates.yml"
+    )
+    assert payload["current_state"]["release"]["url"].endswith("/releases/latest")
 
 
 def test_build_parser_includes_index_subcommand() -> None:

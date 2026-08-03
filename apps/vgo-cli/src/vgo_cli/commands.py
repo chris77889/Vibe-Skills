@@ -15,6 +15,9 @@ from .repo import get_installed_runtime_config, get_local_release_metadata
 from .workspace import extend_workspace_package_path
 
 
+PROJECT_URL = "https://github.com/foryourhealth111-pixel/Vibe-Skills"
+
+
 def _resolve_skills_dir(raw_value: str) -> Path:
     if str(raw_value or '').strip():
         return Path(raw_value).expanduser().resolve()
@@ -141,6 +144,20 @@ def check_command(args: argparse.Namespace) -> int:
     from vgo_installer.simple_skill_installer import check_vibe_skill
 
     result = check_vibe_skill(skills_dir=skills_dir)
+    result["current_state"] = {
+        "local_runtime": {
+            "result": "PASS" if result.get("ok") else "FAIL",
+            "source": "installed_vibe_skill_receipt",
+        },
+        "ci": {
+            "url": f"{PROJECT_URL}/actions/workflows/vco-gates.yml",
+            "source": "generated_workflow_proof",
+        },
+        "release": {
+            "url": f"{PROJECT_URL}/releases/latest",
+            "source": "github_release",
+        },
+    }
     print_json_payload(result)
     return 0 if result.get("ok") else 1
 

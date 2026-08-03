@@ -18,7 +18,7 @@
 这些页面不是历史归档页，仍然属于当前入口面：
 
 - [README.md](./README.md)
-- [current-state.md](./current-state.md)
+- [generated current state](https://github.com/foryourhealth111-pixel/Vibe-Skills/actions/workflows/vco-gates.yml)
 - [roadmap.md](./roadmap.md)
 - [operator-dry-run.md](./operator-dry-run.md)
 - [closure-audit.md](./closure-audit.md)

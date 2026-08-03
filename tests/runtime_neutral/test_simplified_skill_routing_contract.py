@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import tempfile
@@ -284,7 +285,16 @@ class SimplifiedSkillRoutingContractTests(unittest.TestCase):
         if shell is None:
             self.skipTest("PowerShell executable not available")
         with tempfile.TemporaryDirectory() as tempdir:
+            agent_root = Path(tempdir) / ".agents"
+            skills_root = agent_root / "skills"
+            skills_root.mkdir(parents=True)
+            shutil.copytree(
+                REPO_ROOT / "bundled" / "skills" / "scikit-learn",
+                skills_root / "scikit-learn",
+            )
             artifact_root = Path(tempdir) / "artifacts"
+            effective_env = os.environ.copy()
+            effective_env["VIBE_AGENTS_HOME"] = str(agent_root)
             completed = subprocess.run(
                 [
                     shell,
@@ -310,6 +320,7 @@ class SimplifiedSkillRoutingContractTests(unittest.TestCase):
                 text=True,
                 encoding="utf-8",
                 check=True,
+                env=effective_env,
             )
             self.assertIn("packet_path", completed.stdout)
             packet_path = next(artifact_root.rglob("runtime-input-packet.json"))
