@@ -38,26 +38,30 @@ def test_router_readme_names_python_runtime_as_current_routing_owner() -> None:
 
 
 def test_skill_and_provider_docs_name_python_router_owner_before_bridge() -> None:
-    docs = [
-        REPO_ROOT / "SKILL.md",
-        REPO_ROOT / "docs" / "universalization" / "router-provider-layer.md",
-    ]
-    required_claims = (
+    skill_text = (REPO_ROOT / "SKILL.md").read_text(encoding="utf-8")
+    router_text = (REPO_ROOT / "scripts" / "router" / "README.md").read_text(encoding="utf-8")
+    skill_claims = (
         "packages/runtime-core/src/vgo_runtime/router_contract_runtime.py",
         "scripts/router/resolve-pack-route.ps1",
         "compatibility bridge",
+    )
+    router_claims = (
+        "Current routing semantic owner: `packages/runtime-core/src/vgo_runtime/router_contract_runtime.py`.",
+        "resolve-pack-route.ps1 is a compatibility bridge",
+        "modules/ is legacy/helper/compatibility",
     )
     forbidden_claims = (
         "Local installed specialist recommender: `scripts/router/resolve-pack-route.ps1`",
         "The canonical router remains:\n\n- `scripts/router/resolve-pack-route.ps1`",
     )
 
-    for path in docs:
-        content = path.read_text(encoding="utf-8")
-        for claim in required_claims:
-            assert claim in content, path
+    for claim in skill_claims:
+        assert claim in skill_text
+    for claim in router_claims:
+        assert claim in router_text
+    for content in (skill_text, router_text):
         for claim in forbidden_claims:
-            assert claim not in content, path
+            assert claim not in content
 
 
 def test_runtime_contract_names_python_owner_and_powershell_bridge() -> None:

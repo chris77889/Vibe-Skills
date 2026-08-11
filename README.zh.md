@@ -390,7 +390,7 @@ VibeSkills 会把确认过的需求、计划、执行进度和最终检查保存
 | `module-execution.json` | 保存各部分实际完成的结果，以及完成、失败或被卡住的状态 |
 | `delivery-acceptance-report.json` 或 `.md` | 保存最终检查结果，说明哪些项目已经通过 |
 
-维护项目时，可以使用这份[提交前检查清单](docs/status/non-regression-proof-bundle.md)。
+维护项目时，可以查看 [CI 检查结果](https://github.com/foryourhealth111-pixel/Vibe-Skills/actions/workflows/vco-gates.yml) 和本地 `check.ps1` 输出。
 一般先完成清单里的基础检查；只有发现风险时，再扩大检查范围。
 
 </details>
@@ -433,7 +433,7 @@ VibeSkills 会把确认过的需求、计划、执行进度和最终检查保存
     <tr><td align="center">查看一次完整的真实运行</td><td align="center"><strong><a href="./docs/cases/ml-experiment/README.zh.md">机器学习实验案例</a></strong></td></tr>
     <tr><td align="center">安装、更新、卸载</td><td align="center"><strong><a href="./docs/install/README.md">简明安装指南</a></strong></td></tr>
     <tr><td align="center">第一次使用</td><td align="center"><strong><a href="./docs/quick-start.md">快速开始</a></strong></td></tr>
-    <tr><td align="center">当前发布版本</td><td align="center"><strong><a href="./docs/releases/v4.0.0.md">v4.0.0 发布说明</a></strong></td></tr>
+    <tr><td align="center">当前发布版本</td><td align="center"><strong><a href="https://github.com/foryourhealth111-pixel/Vibe-Skills/releases/latest">GitHub Release 元数据</a></strong></td></tr>
     <tr><td align="center">了解它怎么工作</td><td align="center"><strong><a href="./docs/README.md">文档索引</a></strong></td></tr>
     <tr><td align="center">排查问题</td><td align="center"><strong><a href="./docs/troubleshooting.md">故障排查</a></strong></td></tr>
     <tr><td align="center">参与贡献</td><td align="center"><strong><a href="./CONTRIBUTING.md">贡献指南</a></strong></td></tr>

@@ -281,7 +281,7 @@ enabled: true
         run_id="run-123",
     )
 
-    run_root = vibe_root / "runs" / "run-123"
+    run_root = (agent_root / ".vibeskills" / "runs" / "run-123").resolve()
     assert result["run_id"] == "run-123"
     assert list(result)[:4] == ["run_id", "work_dossier", "artifacts", "work_summary"]
     assert result["verification"]["result"] == "needs_execution"
@@ -410,7 +410,7 @@ enabled: true
         "review findings are explicit",
         "tests cover the changed behavior",
     )
-    run_root = vibe_root / "runs" / "run-inferred"
+    run_root = (agent_root / ".vibeskills" / "runs" / "run-inferred").resolve()
     assert (run_root / "plan.json").exists()
 
 
@@ -500,7 +500,7 @@ enabled: true
     }
 
 
-def test_inspect_local_run_reads_the_observable_legacy_projection(
+def test_inspect_local_run_uses_only_the_canonical_projection(
     tmp_path: Path,
 ) -> None:
     agent_root = tmp_path / "agent-root"
@@ -515,10 +515,9 @@ def test_inspect_local_run_reads_the_observable_legacy_projection(
         execute=False,
     )
     canonical_root = Path(str(result["artifact_root"]))
-    legacy_root = Path(str(result["legacy_run_root"]))
     assert canonical_root.is_dir()
-    assert legacy_root.is_dir()
-    shutil.rmtree(canonical_root)
+    assert result["legacy_run_root"] is None
+    assert not (agent_root / "vibe" / "runs" / "legacy-projection").exists()
 
     inspected = inspect_local_run(
         agent_root=agent_root,
@@ -527,62 +526,51 @@ def test_inspect_local_run_reads_the_observable_legacy_projection(
 
     assert inspected["artifact_manifest"] is not None
     assert Path(inspected["artifacts"]["artifact_manifest"]) == (
-        legacy_root / "manifest.json"
+        canonical_root / "manifest.json"
     )
     assert Path(inspected["artifacts"]["requirement"]) == (
-        legacy_root / "requirement.json"
+        canonical_root / "requirement.json"
     )
-    assert inspected["artifact_manifest"]["legacy_compatibility"]["writes"] == [
-        "vibe/runs/legacy-projection"
-    ]
-    assert inspected["artifact_manifest"]["legacy_compatibility"][
-        "write_records"
-    ] == [
-        {
-            "destination": "vibe/runs/legacy-projection",
-            "mode": "dual_write",
-            "removal_release": "4.1.0",
-        }
-    ]
+    assert inspected["artifact_manifest"]["legacy_compatibility"]["mode"] == (
+        "disabled"
+    )
+    assert inspected["artifact_manifest"]["legacy_compatibility"]["writes"] == []
     assert inspected["artifact_resolution"] == {
-        "mode": "legacy_projection",
-        "compatibility_read": True,
+        "mode": "canonical",
+        "compatibility_read": False,
         "requested_root": str(canonical_root),
-        "resolved_root": str(legacy_root),
-        "legacy_removal_release": "4.1.0",
+        "resolved_root": str(canonical_root),
+        "legacy_removal_release": None,
         "observable": True,
     }
 
 
-def test_run_local_kernel_resumes_a_legacy_projection_in_the_canonical_sink(
+def test_run_local_kernel_does_not_resume_an_unregistered_legacy_projection(
     tmp_path: Path,
 ) -> None:
     agent_root = tmp_path / "agent-root"
-    first = run_local_kernel(
-        agent_root=agent_root,
-        prompt="Review the runtime redesign and produce review notes.",
-        run_id="legacy-resume",
-        execute=False,
+    legacy_root = agent_root / "vibe" / "runs" / "legacy-resume"
+    legacy_root.mkdir(parents=True)
+    (legacy_root / "task-card.json").write_text(
+        json.dumps({"goal": "legacy goal"}),
+        encoding="utf-8",
     )
-    canonical_root = Path(str(first["artifact_root"]))
-    legacy_root = Path(str(first["legacy_run_root"]))
-    shutil.rmtree(canonical_root)
 
-    resumed = run_local_kernel(
+    result = run_local_kernel(
         agent_root=agent_root,
         prompt="Continue by adding focused tests and verification evidence.",
         run_id="legacy-resume",
         execute=False,
     )
 
-    assert resumed["task_card"]["goal"] == first["task_card"]["goal"]
-    assert resumed["task_card"]["initial_goal"] == first["task_card"]["initial_goal"]
-    assert resumed["work_summary"]["continuation_mode"] == "revised"
-    assert resumed["work_summary"]["accepted_revision_count"] == 1
-    assert canonical_root.is_dir()
-    assert json.loads((canonical_root / "task-card.json").read_text(encoding="utf-8")) == json.loads(
-        (legacy_root / "task-card.json").read_text(encoding="utf-8")
+    assert result["task_card"]["goal"] == (
+        "Continue by adding focused tests and verification evidence."
     )
+    assert result["work_summary"]["continuation_mode"] == "fresh"
+    assert result["legacy_run_root"] is None
+    assert json.loads(
+        (legacy_root / "task-card.json").read_text(encoding="utf-8")
+    ) == {"goal": "legacy goal"}
 
 
 def test_run_local_kernel_rejects_a_symlinked_legacy_run_root(
@@ -851,7 +839,7 @@ enabled: true
         run_id="skill-aware-run",
     )
 
-    run_root = vibe_root / "runs" / "skill-aware-run"
+    run_root = (agent_root / ".vibeskills" / "runs" / "skill-aware-run").resolve()
     review_text = (run_root / "work-units" / "wu-1" / "artifacts" / "01-review-notes.md").read_text(encoding="utf-8")
     plan_text = (run_root / "work-units" / "wu-2" / "artifacts" / "01-implementation-plan.md").read_text(encoding="utf-8")
     test_text = (run_root / "work-units" / "wu-3" / "artifacts" / "01-focused-tests.md").read_text(encoding="utf-8")
@@ -896,7 +884,7 @@ enabled: true
         run_id="report-run",
     )
 
-    run_root = vibe_root / "runs" / "report-run"
+    run_root = (agent_root / ".vibeskills" / "runs" / "report-run").resolve()
     report_text = (run_root / "work-units" / "wu-1" / "artifacts" / "01-report.md").read_text(encoding="utf-8")
 
     assert "## Summary" in report_text

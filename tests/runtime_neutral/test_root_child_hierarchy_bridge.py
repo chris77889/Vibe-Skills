@@ -240,23 +240,23 @@ def write_delegation_envelope_fixture(
 
 
 class RootChildHierarchyBridgeTests(unittest.TestCase):
-    def test_contract_docs_exist(self) -> None:
-        requirement_doc = REPO_ROOT / "docs" / "requirements" / "2026-03-28-root-child-vibe-hierarchy-governance.md"
-        execution_plan = REPO_ROOT / "docs" / "plans" / "2026-03-28-root-child-vibe-hierarchy-governance-plan.md"
-        stable_doc = REPO_ROOT / "docs" / "root-child-vibe-hierarchy-governance.md"
+    def test_live_contract_replaces_dated_governance_documents(self) -> None:
+        live_contract = json.loads(
+            (REPO_ROOT / "config" / "live-document-contract.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        registered_paths = {str(document["path"]) for document in live_contract["documents"]}
 
-        self.assertTrue(requirement_doc.exists())
-        self.assertTrue(execution_plan.exists())
-        self.assertTrue(stable_doc.exists())
-
-        stable_text = stable_doc.read_text(encoding="utf-8")
-        self.assertIn("Root `vibe`: the only top-level governor", stable_text)
-        self.assertIn("Child `vibe`: a subordinate execution lane", stable_text)
-        self.assertIn("module-work-plan.json", stable_text)
-        self.assertIn("agent-execution-handoff.json", stable_text)
-        self.assertIn("module-execution.json", stable_text)
-        self.assertNotIn("Specialist-Native Lane", stable_text)
-        self.assertNotIn("bounded native units", stable_text)
+        self.assertIn("docs/governance/current-runtime-field-contract.md", registered_paths)
+        self.assertNotIn("docs/requirements/2026-03-28-root-child-vibe-hierarchy-governance.md", registered_paths)
+        self.assertNotIn("docs/plans/2026-03-28-root-child-vibe-hierarchy-governance-plan.md", registered_paths)
+        self.assertFalse(
+            (REPO_ROOT / "docs" / "requirements" / "2026-03-28-root-child-vibe-hierarchy-governance.md").exists()
+        )
+        self.assertFalse(
+            (REPO_ROOT / "docs" / "plans" / "2026-03-28-root-child-vibe-hierarchy-governance-plan.md").exists()
+        )
 
     def test_runtime_input_policy_declares_hierarchy_fields(self) -> None:
         policy_path = REPO_ROOT / "config" / "runtime-input-packet-policy.json"

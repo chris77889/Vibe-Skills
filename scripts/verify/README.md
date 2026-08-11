@@ -7,9 +7,10 @@ The default release closure is intentionally small. Use it to prove the normal r
 ## Start Here
 
 - family map and typical run order: [`gate-family-index.md`](./gate-family-index.md)
-- minimum closure proof contract: [`../../docs/status/non-regression-proof-bundle.md`](../../docs/status/non-regression-proof-bundle.md)
+- minimum closure proof contract: [`../../config/live-document-contract.json`](../../config/live-document-contract.json)
 - broader operator surface: [`../governance/README.md`](../governance/README.md)
-- blackbox/probe workflow: [`../../docs/design/blackbox-probe-and-enhancement-playbook.md`](../../docs/design/blackbox-probe-and-enhancement-playbook.md)
+- blackbox/probe workflow: use the relevant gate family listed in
+  [`gate-family-index.md`](./gate-family-index.md)
 
 ## Most Common Commands
 

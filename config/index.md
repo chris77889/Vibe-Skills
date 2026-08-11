@@ -29,7 +29,7 @@
 1. 先看 [`version-governance.json`](version-governance.json)、[`repo-cleanliness-policy.json`](repo-cleanliness-policy.json)、[`outputs-boundary-policy.json`](outputs-boundary-policy.json)。
 2. 再看 [`runtime-contract.json`](runtime-contract.json)、[`router-thresholds.json`](router-thresholds.json)、[`skill-alias-map.json`](skill-alias-map.json)。
 3. 需要 rollout / admission 时再进入 boards。
-4. 历史 wave boards / scorecards / archived governance-board snapshots 进入 [`../docs/archive/config/README.md`](../docs/archive/config/README.md)。
+4. 历史 wave boards、scorecards 和治理快照通过 Git 历史或 CI 工件检索。
 
 ## Rules
 

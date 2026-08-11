@@ -8,20 +8,18 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 def test_english_readme_keeps_internal_runtime_roles_out_of_default_navigation() -> None:
     readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
-    architecture = (
-        REPO_ROOT / "docs" / "architecture" / "local-agent-kernel-v2.md"
+    runtime_contract = (
+        REPO_ROOT / "docs" / "governance" / "current-runtime-field-contract.md"
     ).read_text(encoding="utf-8")
     forbidden_overclaims = (
         "PowerShell stays only as a thin host wrapper",
         "PowerShell owns launcher wrappers, host receipts, shell-native checks, and leaf execution only",
     )
-    architecture_claims = (
-        "Python owns final truth artifacts",
-        "canonical validation",
-        "structured runtime result",
-        "PowerShell still performs stage orchestration",
-        "Do not add new task semantics to PowerShell",
-        "existing PowerShell stage scripts are transitional orchestration surfaces",
+    runtime_contract_claims = (
+        "Python and PowerShell resolve the same relative fields",
+        "primary release-artifact sink",
+        "module-execution.json",
+        "PowerShell",
     )
     forbidden_claims = (
         "Do not let PowerShell own task semantics.",
@@ -39,9 +37,9 @@ def test_english_readme_keeps_internal_runtime_roles_out_of_default_navigation()
     )
     for phrase in internal_phrases:
         assert phrase not in readme
-    for claim in architecture_claims:
-        assert claim in architecture
-    for content in (readme, architecture):
+    for claim in runtime_contract_claims:
+        assert claim in runtime_contract
+    for content in (readme, runtime_contract):
         for claim in forbidden_overclaims:
             assert claim not in content
         for claim in forbidden_claims:

@@ -40,9 +40,8 @@ $runtimeEntryPath = Get-VgoRuntimeEntrypointPath -RepoRoot $repoRoot -RuntimeCon
 $results = @()
 
 $requiredFiles = @(
-    'docs/root-child-vibe-hierarchy-governance.md',
-    'docs/requirements/2026-03-28-root-child-vibe-hierarchy-governance.md',
-    'docs/plans/2026-03-28-root-child-vibe-hierarchy-governance-plan.md',
+    'config/live-document-contract.json',
+    'config/runtime-input-packet-policy.json',
     'tests/runtime_neutral/test_root_child_hierarchy_bridge.py'
 )
 foreach ($relativePath in $requiredFiles) {
@@ -68,15 +67,6 @@ foreach ($token in @(
 )) {
     Add-Assertion -Results ([ref]$results) -Condition ($policyText.Contains($token)) -Message ("runtime input policy contains hierarchy token: {0}" -f $token)
 }
-
-$runtimeText = Get-Content -LiteralPath (Join-Path $repoRoot 'protocols\runtime.md') -Raw -Encoding UTF8
-$teamText = Get-Content -LiteralPath (Join-Path $repoRoot 'protocols\team.md') -Raw -Encoding UTF8
-$stableDocText = Get-Content -LiteralPath (Join-Path $repoRoot 'docs\root-child-vibe-hierarchy-governance.md') -Raw -Encoding UTF8
-Add-Assertion -Results ([ref]$results) -Condition ($runtimeText.Contains('runtime-selected skill stays `vibe`')) -Message 'runtime protocol documents explicit vibe authority preservation'
-Add-Assertion -Results ([ref]$results) -Condition ($runtimeText.Contains('delegation-envelope.json')) -Message 'runtime protocol documents child delegation envelope'
-Add-Assertion -Results ([ref]$results) -Condition ($teamText.Contains('`vibe` keeps final control')) -Message 'team protocol keeps vibe as final control'
-Add-Assertion -Results ([ref]$results) -Condition ($teamText.Contains('child startup validates inherited requirement/plan truth against that envelope')) -Message 'team protocol documents child delegation validation'
-Add-Assertion -Results ([ref]$results) -Condition ($stableDocText.Contains('root vibe governs, child vibe stays subordinate, the Agent executes approved modules')) -Message 'stable hierarchy doc exposes root/child mental model'
 
 $runId = "root-child-hierarchy-" + [System.Guid]::NewGuid().ToString('N').Substring(0, 8)
 $artifactRoot = Join-Path $repoRoot (".tmp\root-child-hierarchy-{0}" -f $runId)

@@ -4,7 +4,7 @@
 
 ## Start Here
 
-- closure proof contract: [`../../docs/status/non-regression-proof-bundle.md`](../../docs/status/non-regression-proof-bundle.md)
+- closure proof contract: [`../../config/live-document-contract.json`](../../config/live-document-contract.json)
 - verify entrypoint: [`README.md`](./README.md)
 - broader operator surface: [`../governance/README.md`](../governance/README.md)
 
@@ -32,6 +32,6 @@ Default closure should stay small. Packaging, mirror, freshness, and retired-rou
 
 ## Boundary
 
-- proof contract 在 [`../../docs/status/non-regression-proof-bundle.md`](../../docs/status/non-regression-proof-bundle.md)
+- proof contract 在 [`../../config/live-document-contract.json`](../../config/live-document-contract.json)
 - operator 导航在 [`../README.md`](../README.md)
 - 长期 contracts / ledgers / playbooks 在 [`../../references/index.md`](../../references/index.md)

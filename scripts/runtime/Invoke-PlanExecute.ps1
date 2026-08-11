@@ -28,13 +28,18 @@ if ([string]::IsNullOrWhiteSpace($RunId)) {
 
 $artifactBaseRoot = Get-VibeArtifactRoot -RepoRoot $runtime.repo_root -Runtime $runtime -ArtifactRoot $ArtifactRoot
 $sessionRoot = Ensure-VibeSessionRoot -RepoRoot $runtime.repo_root -RunId $RunId -Runtime $runtime -WorkspaceRoot $WorkspaceRoot -ArtifactRoot $artifactBaseRoot
+$canonicalArtifactPaths = Get-VibeRunArtifactPaths `
+    -RepoRoot $runtime.repo_root `
+    -RunId $RunId `
+    -WorkspaceRoot $WorkspaceRoot `
+    -ArtifactRoot $ArtifactRoot
 $requirementPath = if ([string]::IsNullOrWhiteSpace($RequirementDocPath)) {
-    Get-VibeRequirementDocPath -RepoRoot $runtime.repo_root -Task $Task -ArtifactRoot $artifactBaseRoot
+    [string]$canonicalArtifactPaths.primary_requirement
 } else {
     [System.IO.Path]::GetFullPath($RequirementDocPath)
 }
 $planPath = if ([string]::IsNullOrWhiteSpace($ExecutionPlanPath)) {
-    Get-VibeExecutionPlanPath -RepoRoot $runtime.repo_root -Task $Task -ArtifactRoot $artifactBaseRoot
+    [string]$canonicalArtifactPaths.primary_plan
 } else {
     [System.IO.Path]::GetFullPath($ExecutionPlanPath)
 }

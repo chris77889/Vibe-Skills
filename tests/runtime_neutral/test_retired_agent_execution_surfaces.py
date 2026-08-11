@@ -26,27 +26,21 @@ ACTIVE_ROOT_FILES = (
 CURRENT_GOVERNANCE_FILES = (
     "CONTRIBUTING.md",
     "docs/developer-change-governance.md",
-    "docs/contributor-default-runbooks.md",
-    "docs/operator-default-runbooks.md",
-    "references/runtime-contract-schema-reference.md",
-    "references/runtime-contract-schema.md",
+    "docs/governance/README.md",
+    "docs/governance/current-runtime-field-contract.md",
+    "docs/governance/current-routing-contract.md",
+    "references/developer-entry-contract.md",
 )
-CURRENT_STATUS_FILES = (
-    "docs/status/kernel-first-remediation-phase-summary.md",
-    "docs/status/test-governance-classification-matrix.md",
-)
+CURRENT_STATUS_FILES: tuple[str, ...] = ()
 CURRENT_SCENARIO_FILES = (
     "tests/scenarios/project_delivery/l-grade-feature-complete.json",
     "tests/scenarios/project_delivery/xl-composite-manual-review.json",
 )
 EXECUTION_CONTRACT_FILES = (
     "protocols/team.md",
-    "references/runtime-contract-schema.md",
-    "references/runtime-contract-schema-reference.md",
-    "references/runtime-contract-field-contract.md",
+    "protocols/runtime.md",
     "docs/governance/vibe-governed-project-delivery-acceptance-governance.md",
-    "docs/governance/role-pack-v2-governance.md",
-    "docs/role-pack-v2-governance.md",
+    "docs/governance/current-runtime-field-contract.md",
 )
 TEXT_SUFFIXES = {".json", ".md", ".ps1", ".py", ".sh", ".yaml", ".yml"}
 AGENT_HANDOFF_ARTIFACTS = (
@@ -118,11 +112,7 @@ RETIREMENT_GUARDS = {
         "execution_topology",
         "execution_proof_manifest",
     },
-    "references/runtime-contract-schema-reference.md": {
-        "specialist_accounting",
-        "specialist_decision",
-    },
-    "references/runtime-contract-schema.md": {
+    "docs/governance/current-runtime-field-contract.md": {
         "specialist_accounting",
         "specialist_decision",
     },
@@ -294,10 +284,7 @@ def test_public_and_current_architecture_docs_do_not_publish_retired_execution_o
         "README.md": ("specialist decision truth", "leaf execution"),
         "README.zh.md": ("专家决策真相", "叶子执行"),
         "docs/governance/current-runtime-field-contract.md": ("specialist_decision",),
-        "docs/architecture/legacy-topology-audit.md": (
-            "Invoke-DelegatedLaneUnit",
-            "VibeExecution.Common",
-        ),
+        "docs/README.md": ("specialist decision truth", "leaf execution"),
     }
     problems: dict[str, list[str]] = {}
     for relative_path, retired_phrases in public_docs.items():
@@ -306,19 +293,15 @@ def test_public_and_current_architecture_docs_do_not_publish_retired_execution_o
         if hits:
             problems[relative_path] = hits
 
-    current_chain = (
-        "agent_skill_organization -> module-work-plan.json -> "
-        "agent-execution-handoff.json -> module-execution.json"
+    current_chain_fragments = (
+        "agent_skill_organization -> module-work-plan.json",
+        "module-work-plan.json -> agent-execution-handoff.json",
+        "agent-execution-handoff.json -> module-execution.json",
     )
-    for relative_path in (
-        "docs/governance/absorption-admission-matrix.md",
-        "docs/governance/connector-scorecard-governance.md",
-    ):
-        head = "\n".join(
-            (REPO_ROOT / relative_path).read_text(encoding="utf-8").splitlines()[:5]
-        )
-        if "skill_usage" in head or current_chain not in head:
-            problems[relative_path] = ["historical note publishes the wrong current truth chain"]
+    for relative_path in ("docs/governance/current-runtime-field-contract.md",):
+        text = (REPO_ROOT / relative_path).read_text(encoding="utf-8")
+        if "skill_usage" in text or any(fragment not in text for fragment in current_chain_fragments):
+            problems[relative_path] = ["current contract publishes the wrong truth chain"]
 
     assert not problems, problems
 
@@ -365,11 +348,7 @@ def test_current_status_and_scenarios_publish_live_agent_handoff_truth() -> None
 
 def test_current_plans_and_upstream_lock_name_the_agent_as_execution_owner() -> None:
     earlier_plan = REPO_ROOT / "docs/plans/2026-07-12-vibe-module-driven-orchestration-kernel-execution-plan.md"
-    plan_head = "\n".join(earlier_plan.read_text(encoding="utf-8").splitlines()[:20]).casefold()
-    assert "superseded" in plan_head
-    assert "2026-07-12-vibe-agent-execution-handoff-control-flow-repair-plan.md" in plan_head
-    assert "current agent" in plan_head
-    assert "module-execution.json" in plan_head
+    assert not earlier_plan.exists()
 
     upstream_lock = json.loads((REPO_ROOT / "config/upstream-lock.json").read_text(encoding="utf-8"))
     serialized = json.dumps(upstream_lock, ensure_ascii=False).casefold()

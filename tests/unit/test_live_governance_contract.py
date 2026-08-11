@@ -15,6 +15,7 @@ if str(CONTRACTS_SRC) not in sys.path:
 import vgo_contracts  # noqa: E402
 from vgo_contracts.live_governance_contract import (  # noqa: E402
     LiveGovernanceContract,
+    build_live_document_census,
     load_live_governance_contract,
     validate_live_document_changes,
     validate_live_document_registry_transition,
@@ -195,6 +196,60 @@ def test_live_document_changes_allow_registered_and_narrowly_excluded_markdown()
             "bundled/skills/example/SKILL.md",
         ],
     ) == ["README.md"]
+
+
+def test_live_document_census_classifies_the_complete_governed_surface() -> None:
+    contract = LiveGovernanceContract.model_validate(_contract_payload())
+
+    census = build_live_document_census(
+        contract,
+        [
+            "README.md",
+            "docs/runtime-contract.md",
+            "references/proof-policy.md",
+            "THIRD_PARTY_LICENSES.md",
+            "references/provenance/source-record.md",
+            "docs/archive/retired-plan.md",
+            "docs/New Guide.MD",
+            "bundled/skills/example/SKILL.md",
+            "scripts/README.md",
+        ],
+    )
+
+    assert census.governed_markdown_count == 7
+    assert census.registered_count == 3
+    assert census.excluded_count == 2
+    assert census.unregistered_count == 2
+    assert [entry.path for entry in census.documents] == sorted(
+        (entry.path for entry in census.documents),
+        key=lambda path: (path.casefold(), path),
+    )
+    entries = {entry.path: entry for entry in census.documents}
+    assert entries["README.md"].registry_status == "registered"
+    assert entries["README.md"].document_id == "project-entry"
+    assert entries["THIRD_PARTY_LICENSES.md"].registry_status == "excluded"
+    assert entries["THIRD_PARTY_LICENSES.md"].exclusion_rule == (
+        "path:THIRD_PARTY_LICENSES.md"
+    )
+    assert entries["references/provenance/source-record.md"].exclusion_rule == (
+        "prefix:references/provenance/"
+    )
+    assert entries["docs/archive/retired-plan.md"].registry_status == (
+        "unregistered"
+    )
+    assert entries["docs/archive/retired-plan.md"].migration_bucket == "docs/archive"
+    assert "bundled/skills/example/SKILL.md" not in entries
+    assert "scripts/README.md" not in entries
+
+
+def test_live_document_census_rejects_case_ambiguous_tracked_paths() -> None:
+    contract = LiveGovernanceContract.model_validate(_contract_payload())
+
+    with pytest.raises(ValueError, match="case-ambiguous"):
+        build_live_document_census(
+            contract,
+            ["docs/Guide.md", "docs/guide.md"],
+        )
 
 
 def test_live_document_registry_removal_requires_file_removal(tmp_path: Path) -> None:

@@ -207,9 +207,10 @@ Write or attach a plan before editing if:
 - the change affects vendored, mirrored, provenance, or disclosure surfaces
 - you cannot explain the proof set before making the edit
 
-Current program plan:
+Current program contract:
 
-- [`plans/2026-03-13-post-upstream-governance-developer-entry-plan.md`](plans/2026-03-13-post-upstream-governance-developer-entry-plan.md)
+- [`../config/live-document-contract.json`](../config/live-document-contract.json)
+- [`../references/developer-entry-contract.md`](../references/developer-entry-contract.md)
 
 ## Runtime Proof Bundle
 

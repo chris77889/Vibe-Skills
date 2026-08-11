@@ -6243,6 +6243,46 @@ function Get-VibeRequirementDocPath {
     param(
         [Parameter(Mandatory)] [string]$RepoRoot,
         [Parameter(Mandatory)] [string]$Task,
+        [Parameter(Mandatory)] [string]$RunId,
+        [AllowEmptyString()] [string]$ArtifactRoot = '',
+        [AllowEmptyString()] [string]$WorkspaceRoot = ''
+    )
+
+    if ([string]::IsNullOrWhiteSpace($RunId)) {
+        throw 'RunId is required to resolve the canonical requirement artifact path.'
+    }
+    $paths = Get-VibeRunArtifactPaths `
+        -RepoRoot $RepoRoot `
+        -RunId $RunId `
+        -WorkspaceRoot $WorkspaceRoot `
+        -ArtifactRoot $ArtifactRoot
+    return [string]$paths.primary_requirement
+}
+
+function Get-VibeExecutionPlanPath {
+    param(
+        [Parameter(Mandatory)] [string]$RepoRoot,
+        [Parameter(Mandatory)] [string]$Task,
+        [Parameter(Mandatory)] [string]$RunId,
+        [AllowEmptyString()] [string]$ArtifactRoot = '',
+        [AllowEmptyString()] [string]$WorkspaceRoot = ''
+    )
+
+    if ([string]::IsNullOrWhiteSpace($RunId)) {
+        throw 'RunId is required to resolve the canonical execution-plan artifact path.'
+    }
+    $paths = Get-VibeRunArtifactPaths `
+        -RepoRoot $RepoRoot `
+        -RunId $RunId `
+        -WorkspaceRoot $WorkspaceRoot `
+        -ArtifactRoot $ArtifactRoot
+    return [string]$paths.primary_plan
+}
+
+function Get-VibeLegacyRequirementDocPath {
+    param(
+        [Parameter(Mandatory)] [string]$RepoRoot,
+        [Parameter(Mandatory)] [string]$Task,
         [AllowEmptyString()] [string]$ArtifactRoot = '',
         [AllowEmptyString()] [string]$WorkspaceRoot = ''
     )
@@ -6257,7 +6297,7 @@ function Get-VibeRequirementDocPath {
     return [System.IO.Path]::GetFullPath((Join-Path $legacyRootPath ("{0}-{1}.md" -f $date, $slug)))
 }
 
-function Get-VibeExecutionPlanPath {
+function Get-VibeLegacyExecutionPlanPath {
     param(
         [Parameter(Mandatory)] [string]$RepoRoot,
         [Parameter(Mandatory)] [string]$Task,

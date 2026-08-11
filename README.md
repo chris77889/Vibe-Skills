@@ -408,7 +408,7 @@ completion.
 | `delivery-acceptance-report.json` or `.md` | Stores the final check and shows which items passed |
 
 Maintainers can use the
-[pre-release checklist](docs/status/non-regression-proof-bundle.md). Start with
+[pre-release checks](https://github.com/foryourhealth111-pixel/Vibe-Skills/actions/workflows/vco-gates.yml). Start with
 the checks in that list and run wider audits only when there is a reason.
 
 </details>
@@ -451,7 +451,7 @@ not mean the final result passed its checks.
     <tr><td align="center">See a complete real run</td><td align="center"><strong><a href="./docs/cases/ml-experiment/README.md">Machine-learning experiment case</a></strong></td></tr>
     <tr><td align="center">Install, update, uninstall</td><td align="center"><strong><a href="./docs/install/README.en.md">Simple install</a></strong></td></tr>
     <tr><td align="center">First use</td><td align="center"><strong><a href="./docs/quick-start.en.md">Quick start</a></strong></td></tr>
-    <tr><td align="center">Current release</td><td align="center"><strong><a href="./docs/releases/v4.0.0.md">v4.0.0 notes</a></strong></td></tr>
+    <tr><td align="center">Current release</td><td align="center"><strong><a href="https://github.com/foryourhealth111-pixel/Vibe-Skills/releases/latest">GitHub release metadata</a></strong></td></tr>
     <tr><td align="center">How it works</td><td align="center"><strong><a href="./docs/README.md">Documentation index</a></strong></td></tr>
     <tr><td align="center">Troubleshooting</td><td align="center"><strong><a href="./docs/troubleshooting.md">Troubleshooting guide</a></strong></td></tr>
     <tr><td align="center">Contributing</td><td align="center"><strong><a href="./CONTRIBUTING.md">Contribution guide</a></strong></td></tr>

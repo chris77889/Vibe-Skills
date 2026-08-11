@@ -81,8 +81,6 @@
       "config",
       "docs/README.md",
       "docs/governance/README.md",
-      "docs/status/README.md",
-      "docs/releases/README.md",
       "docs/governance/vibe-governed-project-delivery-acceptance-governance.md",
       "scripts/router/resolve-pack-route.ps1",
       "scripts/router",
@@ -96,7 +94,6 @@
       "docs/governance/current-routing-contract.md",
       "docs/governance/current-runtime-field-contract.md",
       "docs/install",
-      "docs/status",
       "protocols"
     ],
     "legacy_allowed_paths": [

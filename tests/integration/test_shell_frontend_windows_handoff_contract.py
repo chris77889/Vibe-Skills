@@ -18,15 +18,3 @@ def test_check_shell_uses_portable_simple_cli_wrapper() -> None:
     assert "vgo_cli.main check" in check_shell
     assert "Windows shell frontend detected; switching to PowerShell-first supported path." not in check_shell
     assert "handoff_to_windows_powershell_frontend" not in check_shell
-
-
-def test_windows_support_matrix_mentions_powershell_first_shell_handoff() -> None:
-    content = (REPO_ROOT / "docs" / "universalization" / "platform-support-matrix.md").read_text(encoding="utf-8")
-    assert "Windows shell frontends should hand off to PowerShell-first when a PowerShell host is available." in content
-
-
-def test_legacy_installation_rules_are_archived() -> None:
-    archived = REPO_ROOT / "docs/archive/install-legacy/2026-07-02/installation-rules.md"
-
-    assert archived.is_file()
-    assert "Windows bash frontends are convenience wrappers" in archived.read_text(encoding="utf-8")

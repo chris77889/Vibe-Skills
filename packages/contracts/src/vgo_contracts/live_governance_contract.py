@@ -170,6 +170,72 @@ class LiveDocumentEntry:
 
 
 @dataclass(slots=True, frozen=True)
+class LiveDocumentCensusEntry:
+    path: str
+    registry_status: str
+    governed_root: str
+    migration_bucket: str
+    document_id: str | None = None
+    owner: str | None = None
+    lifecycle: str | None = None
+    exclusion_rule: str | None = None
+
+    def model_dump(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "path": self.path,
+            "registry_status": self.registry_status,
+            "governed_root": self.governed_root,
+            "migration_bucket": self.migration_bucket,
+        }
+        if self.document_id is not None:
+            payload["document_id"] = self.document_id
+        if self.owner is not None:
+            payload["owner"] = self.owner
+        if self.lifecycle is not None:
+            payload["lifecycle"] = self.lifecycle
+        if self.exclusion_rule is not None:
+            payload["exclusion_rule"] = self.exclusion_rule
+        return payload
+
+
+@dataclass(slots=True, frozen=True)
+class LiveDocumentCensus:
+    documents: tuple[LiveDocumentCensusEntry, ...]
+
+    @property
+    def governed_markdown_count(self) -> int:
+        return len(self.documents)
+
+    @property
+    def registered_count(self) -> int:
+        return sum(
+            entry.registry_status == "registered" for entry in self.documents
+        )
+
+    @property
+    def excluded_count(self) -> int:
+        return sum(entry.registry_status == "excluded" for entry in self.documents)
+
+    @property
+    def unregistered_count(self) -> int:
+        return sum(
+            entry.registry_status == "unregistered" for entry in self.documents
+        )
+
+    def model_dump(self) -> dict[str, Any]:
+        return {
+            "schema_version": 1,
+            "governed_markdown_count": self.governed_markdown_count,
+            "counts": {
+                "registered": self.registered_count,
+                "excluded": self.excluded_count,
+                "unregistered": self.unregistered_count,
+            },
+            "documents": [entry.model_dump() for entry in self.documents],
+        }
+
+
+@dataclass(slots=True, frozen=True)
 class StableEntryLinks:
     source: str
     targets: tuple[str, ...]
@@ -1029,6 +1095,99 @@ def _is_path_under_governed_roots(
         ):
             return True
     return False
+
+
+def _governed_root_for_path(
+    document_path: str,
+    governed_roots: tuple[str, ...],
+) -> str | None:
+    for root in governed_roots:
+        if _is_path_under_governed_roots(document_path, (root,)):
+            return root
+    return None
+
+
+def build_live_document_census(
+    contract: LiveGovernanceContract,
+    tracked_paths: list[str] | tuple[str, ...],
+) -> LiveDocumentCensus:
+    normalized_paths: dict[str, str] = {}
+    for raw_path in tracked_paths:
+        path = _normalize_relative_path(raw_path, "tracked path")
+        if not path.casefold().endswith(".md"):
+            continue
+        folded_path = path.casefold()
+        existing = normalized_paths.get(folded_path)
+        if existing is not None and existing != path:
+            raise ValueError(
+                "tracked Markdown paths are case-ambiguous: "
+                f"{existing}, {path}"
+            )
+        normalized_paths[folded_path] = path
+
+    registered_documents = {
+        document.path.casefold(): document for document in contract.documents
+    }
+    excluded_paths = {
+        path.casefold(): path for path in contract.excluded_paths
+    }
+    entries: list[LiveDocumentCensusEntry] = []
+    for path in sorted(
+        normalized_paths.values(),
+        key=lambda candidate: (candidate.casefold(), candidate),
+    ):
+        governed_root = _governed_root_for_path(path, contract.governed_roots)
+        if governed_root is None:
+            continue
+        migration_bucket = PurePosixPath(path).parent.as_posix()
+        excluded_path = excluded_paths.get(path.casefold())
+        excluded_prefix = next(
+            (
+                prefix
+                for prefix in contract.excluded_prefixes
+                if path.casefold().startswith(prefix.casefold())
+            ),
+            None,
+        )
+        if excluded_path is not None or excluded_prefix is not None:
+            exclusion_rule = (
+                f"path:{excluded_path}"
+                if excluded_path is not None
+                else f"prefix:{excluded_prefix}"
+            )
+            entries.append(
+                LiveDocumentCensusEntry(
+                    path=path,
+                    registry_status="excluded",
+                    governed_root=governed_root,
+                    migration_bucket=migration_bucket,
+                    exclusion_rule=exclusion_rule,
+                )
+            )
+            continue
+        document = registered_documents.get(path.casefold())
+        if document is not None:
+            entries.append(
+                LiveDocumentCensusEntry(
+                    path=path,
+                    registry_status="registered",
+                    governed_root=governed_root,
+                    migration_bucket=migration_bucket,
+                    document_id=document.document_id,
+                    owner=document.owner,
+                    lifecycle=document.lifecycle,
+                )
+            )
+            continue
+        entries.append(
+            LiveDocumentCensusEntry(
+                path=path,
+                registry_status="unregistered",
+                governed_root=governed_root,
+                migration_bucket=migration_bucket,
+            )
+        )
+    return LiveDocumentCensus(documents=tuple(entries))
 
 
 def resolve_live_governance_contract_path(start_path: str | Path) -> Path:

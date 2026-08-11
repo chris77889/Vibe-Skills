@@ -70,6 +70,26 @@ def _dot_source_common() -> str:
     return f"$ErrorActionPreference = 'Stop'; . {_ps_quote(common)}; "
 
 
+def _write_contract_repository(
+    root: Path,
+    *,
+    legacy_write_mode: str,
+) -> Path:
+    payload = json.loads(
+        (REPO_ROOT / "config" / "live-document-contract.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    payload["artifact_sink"]["legacy_write_mode"] = legacy_write_mode
+    contract_path = root / "config" / "live-document-contract.json"
+    contract_path.parent.mkdir(parents=True)
+    contract_path.write_text(
+        json.dumps(payload, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return root
+
+
 def test_python_and_powershell_resolve_the_same_run_artifact_paths(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -413,6 +433,10 @@ def test_python_and_powershell_normalize_compatibility_write_records(
     expected_legacy_write = "docs/requirements/legacy.md"
     python_workspace = tmp_path / "python"
     powershell_workspace = tmp_path / "powershell"
+    contract_repo = _write_contract_repository(
+        tmp_path / "contract-repo",
+        legacy_write_mode="dual_write",
+    )
     python_workspace.mkdir()
     powershell_workspace.mkdir()
 
@@ -420,7 +444,7 @@ def test_python_and_powershell_normalize_compatibility_write_records(
         agent_root=python_workspace,
         workspace_root=python_workspace,
         run_id=run_id,
-        repo_root=REPO_ROOT,
+        repo_root=contract_repo,
     )
     python_manifest = write_runtime_artifact_bundle(
         projection,
@@ -428,7 +452,7 @@ def test_python_and_powershell_normalize_compatibility_write_records(
         plan={"status": "pending"},
         status={"status": "pending"},
         proof={"status": "pending"},
-        repo_root=REPO_ROOT,
+        repo_root=contract_repo,
         legacy_writes=[raw_legacy_write],
     ).model_dump()
     python_compatibility = json.loads(
@@ -440,7 +464,7 @@ def test_python_and_powershell_normalize_compatibility_write_records(
     powershell_result = _run_powershell_json(
         _dot_source_common()
         + "$result = Write-VibeRunArtifactBundle "
-        + f"-RepoRoot {_ps_quote(REPO_ROOT)} -RunId {_ps_quote(run_id)} "
+        + f"-RepoRoot {_ps_quote(contract_repo)} -RunId {_ps_quote(run_id)} "
         + f"-ArtifactRoot {_ps_quote(powershell_workspace)} "
         + f"-LegacyWrites @({_ps_quote(raw_legacy_write)}); "
         + "$result | ConvertTo-Json -Depth 20"
@@ -630,12 +654,16 @@ def test_python_legacy_projection_is_always_reported_as_a_compatibility_write(
     tmp_path: Path,
 ) -> None:
     workspace = tmp_path / "workspace"
+    contract_repo = _write_contract_repository(
+        tmp_path / "contract-repo",
+        legacy_write_mode="dual_write",
+    )
     workspace.mkdir()
     projection = resolve_runtime_artifact_projection(
         agent_root=workspace,
         workspace_root=None,
         run_id="observable-legacy-projection",
-        repo_root=REPO_ROOT,
+        repo_root=contract_repo,
     )
 
     manifest = write_runtime_artifact_bundle(
@@ -644,7 +672,7 @@ def test_python_legacy_projection_is_always_reported_as_a_compatibility_write(
         plan={"status": "pending"},
         status={"status": "pending"},
         proof={"status": "pending"},
-        repo_root=REPO_ROOT,
+        repo_root=contract_repo,
     ).model_dump()
 
     destination = "vibe/runs/observable-legacy-projection"
@@ -704,7 +732,7 @@ def test_python_and_powershell_reject_undeclared_compatibility_destinations_befo
     assert powershell_result["run_root_exists"] is False
 
 
-def test_powershell_primary_documents_use_the_run_sink_and_report_dual_writes(
+def test_powershell_primary_documents_use_only_the_run_sink(
     tmp_path: Path,
 ) -> None:
     workspace = tmp_path / "workspace"
@@ -805,42 +833,25 @@ def test_powershell_primary_documents_use_the_run_sink_and_report_dual_writes(
     )
     primary_requirement = run_root / "requirement.md"
     primary_plan = run_root / "plan.md"
-    legacy_requirement = Path(summary["artifacts"]["legacy_requirement_doc"])
-    legacy_plan = Path(summary["artifacts"]["legacy_execution_plan"])
-
     assert Path(summary["artifacts"]["requirement_doc"]) == primary_requirement
     assert Path(summary["artifacts"]["execution_plan"]) == primary_plan
-    assert primary_requirement.read_bytes() == legacy_requirement.read_bytes()
-    assert primary_plan.read_bytes() == legacy_plan.read_bytes()
-    assert legacy_requirement.is_relative_to(workspace / "docs" / "requirements")
-    assert legacy_plan.is_relative_to(workspace / "docs" / "plans")
+    assert summary["artifacts"]["legacy_requirement_doc"] == ""
+    assert summary["artifacts"]["legacy_execution_plan"] == ""
     assert Path(requirement_receipt["requirement_doc_path"]) == primary_requirement
-    assert Path(requirement_receipt["legacy_requirement_doc_path"]) == legacy_requirement
+    assert requirement_receipt["legacy_requirement_doc_path"] is None
     assert Path(plan_receipt["requirement_doc_path"]) == primary_requirement
     assert Path(plan_receipt["execution_plan_path"]) == primary_plan
-    assert Path(plan_receipt["legacy_execution_plan_path"]) == legacy_plan
+    assert plan_receipt["legacy_execution_plan_path"] is None
+    assert not (workspace / "docs" / "requirements").exists()
+    assert not (workspace / "docs" / "plans").exists()
 
     manifest = json.loads((run_root / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["legacy_compatibility"] == {
-        "mode": "dual_write",
+        "mode": "disabled",
         "removal_release": "4.1.0",
         "documentation_roots": ["docs/requirements", "docs/plans"],
-        "writes": [
-            "docs/requirements/" + legacy_requirement.name,
-            "docs/plans/" + legacy_plan.name,
-        ],
-        "write_records": [
-            {
-                "destination": "docs/requirements/" + legacy_requirement.name,
-                "mode": "dual_write",
-                "removal_release": "4.1.0",
-            },
-            {
-                "destination": "docs/plans/" + legacy_plan.name,
-                "mode": "dual_write",
-                "removal_release": "4.1.0",
-            },
-        ],
+        "writes": [],
+        "write_records": [],
         "observable": True,
     }
     requirement_artifact = json.loads(
@@ -850,7 +861,6 @@ def test_powershell_primary_documents_use_the_run_sink_and_report_dual_writes(
     assert requirement_artifact["requirement_doc_path"] == str(primary_requirement)
     assert plan_artifact["execution_plan_path"] == str(primary_plan)
 
-    shutil.rmtree(workspace / "docs")
     assert primary_requirement.is_file()
     assert primary_plan.is_file()
     module_work_plan = json.loads(
