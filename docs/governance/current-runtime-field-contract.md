@@ -8,6 +8,53 @@ This document defines the current runtime truth vocabulary for Vibe-Skills.
 The packet freezes approved plan inputs; later work-loop artifacts prove what
 actually happened.
 
+## Run Artifact Contract
+
+`config/live-document-contract.json` is the executable authority for run
+artifacts. Python and PowerShell resolve the same relative fields from the
+governed workspace and fail closed when the file is missing, malformed, or
+type-invalid. The stable diagnostic prefix is
+`live governance artifact contract is required: <contract-path>:`.
+
+The primary release-artifact sink is:
+
+```text
+.vibeskills/runs/<run_id>/
+```
+
+The sink contains the required `requirement`, `plan`, `status`, and `proof`
+artifacts, their declared primary Markdown documents, `manifest.json`, and
+`legacy-compatibility.json`. The primary document paths are resolved under the
+run sink. Historical documentation roots such as `docs/requirements` and
+`docs/plans` are compatibility destinations only and are rejected as the
+primary sink.
+
+Runtime session receipts have a separate declared boundary:
+
+```text
+.vibeskills/outputs/runtime/vibe-sessions/<run_id>/
+```
+
+`artifact_sink.session_receipts` is owned by `runtime`, has
+`retention = workspace_local`, and requires `copy_to_artifact_sink = true`.
+The runtime may write receipts in this workspace-local directory; completion
+copies them into the primary run sink so the release artifact remains
+self-contained. Synchronization accepts only the exact contract-declared
+session root for the run. `legacy_projection_root` is a compatibility
+projection under the declared compatibility window and does not change
+primary ownership.
+
+Child-governed stages may read the root requirement and plan. Those inherited
+paths must resolve to the root run's contract-derived primary documents;
+historical documentation paths are rejected. A child receipt records the
+inherited inputs and does not claim a child-owned primary document destination.
+
+Every compatibility destination is observable in the run manifest under
+`legacy_compatibility.write_records`. Each record contains the normalized
+workspace-relative POSIX `destination`, the contract `mode`, and the declared
+`removal_release`. An empty list means that no compatibility write occurred;
+the manifest still records `observable = true`.
+
 ## Canonical Truth Chain
 
 ```text

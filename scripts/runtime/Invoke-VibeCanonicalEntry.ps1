@@ -27,6 +27,11 @@ if ($PSVersionTable.PSEdition -eq 'Desktop' -or $PSVersionTable.Platform -eq 'Wi
 
 $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
 $runtimeEntrypoint = Join-Path $PSScriptRoot 'invoke-vibe-runtime.ps1'
+$runtimeCommonPath = Join-Path $PSScriptRoot 'VibeRuntime.Common.ps1'
+if (-not (Test-Path -LiteralPath $runtimeCommonPath -PathType Leaf)) {
+    throw ('live governance artifact contract is required: missing runtime contract helper: {0}' -f $runtimeCommonPath)
+}
+. $runtimeCommonPath
 $helperPath = Join-Path $repoRoot 'scripts\common\vibe-governance-helpers.ps1'
 $launcherPath = $PSCommandPath
 $previousHostId = $env:VCO_HOST_ID
@@ -95,11 +100,17 @@ function Resolve-CanonicalArtifactRoot {
 
 function Resolve-CanonicalSessionRoot {
     param(
+        [Parameter(Mandatory)] [string]$RepoRoot,
+        [Parameter(Mandatory)] [string]$WorkspaceRoot,
         [Parameter(Mandatory)] [string]$ArtifactRoot,
         [Parameter(Mandatory)] [string]$RunId
     )
 
-    return [System.IO.Path]::GetFullPath((Join-Path $ArtifactRoot (Join-Path 'outputs\runtime\vibe-sessions' $RunId)))
+    return Get-VibeSessionRoot `
+        -RepoRoot $RepoRoot `
+        -RunId $RunId `
+        -WorkspaceRoot $WorkspaceRoot `
+        -ArtifactRoot $ArtifactRoot
 }
 
 function New-HostLaunchReceiptPayload {
@@ -146,7 +157,11 @@ function Assert-CanonicalTruthArtifacts {
 
 try {
     $env:VCO_HOST_ID = $HostId
-    $resolvedRunId = if ([string]::IsNullOrWhiteSpace($RunId)) { New-CanonicalRunId } else { $RunId }
+    $resolvedRunId = if ([string]::IsNullOrWhiteSpace($RunId)) {
+        New-CanonicalRunId
+    } else {
+        Resolve-VibeSafeRunId -RunId $RunId
+    }
     $resolvedWorkspaceRoot = if (-not [string]::IsNullOrWhiteSpace($WorkspaceRoot)) {
         if ([System.IO.Path]::IsPathRooted($WorkspaceRoot)) {
             [System.IO.Path]::GetFullPath($WorkspaceRoot)
@@ -163,7 +178,11 @@ try {
     } else {
         Resolve-CanonicalArtifactRoot -BaseRoot $resolvedWorkspaceRoot -ArtifactRoot $ArtifactRoot
     }
-    $sessionRoot = Resolve-CanonicalSessionRoot -ArtifactRoot $resolvedArtifactRoot -RunId $resolvedRunId
+    $sessionRoot = Resolve-CanonicalSessionRoot `
+        -RepoRoot $repoRoot `
+        -WorkspaceRoot $resolvedWorkspaceRoot `
+        -ArtifactRoot $resolvedArtifactRoot `
+        -RunId $resolvedRunId
     $summaryPath = Join-Path $sessionRoot 'runtime-summary.json'
     $receiptPath = Join-Path $sessionRoot 'host-launch-receipt.json'
 
@@ -203,20 +222,44 @@ try {
         if ($null -eq $result) {
             throw 'runtime entrypoint returned no payload'
         }
-
-        if ($result.PSObject.Properties.Name -contains 'run_id' -and -not [string]::IsNullOrWhiteSpace([string]$result.run_id)) {
-            $resolvedRunId = [string]$result.run_id
+        $expectedSessionRoot = Resolve-CanonicalSessionRoot `
+            -RepoRoot $repoRoot `
+            -WorkspaceRoot $resolvedWorkspaceRoot `
+            -ArtifactRoot $resolvedArtifactRoot `
+            -RunId $resolvedRunId
+        $expectedSummaryPath = [System.IO.Path]::GetFullPath((Join-Path $expectedSessionRoot 'runtime-summary.json'))
+        if (
+            -not ($result.PSObject.Properties.Name -contains 'run_id') -or
+            $result.run_id -isnot [string] -or
+            [string]::IsNullOrWhiteSpace([string]$result.run_id) -or
+            ([string]$result.run_id).Trim() -cne $resolvedRunId
+        ) {
+            throw 'runtime entrypoint returned a run_id that does not match the live governance contract.'
         }
-        if ($result.PSObject.Properties.Name -contains 'session_root' -and -not [string]::IsNullOrWhiteSpace([string]$result.session_root)) {
-            $sessionRoot = [System.IO.Path]::GetFullPath([string]$result.session_root)
-        } else {
-            $sessionRoot = Resolve-CanonicalSessionRoot -ArtifactRoot $resolvedArtifactRoot -RunId $resolvedRunId
+        if (
+            -not ($result.PSObject.Properties.Name -contains 'session_root') -or
+            $result.session_root -isnot [string] -or
+            [string]::IsNullOrWhiteSpace([string]$result.session_root)
+        ) {
+            throw 'runtime entrypoint must return session_root.'
         }
-        if ($result.PSObject.Properties.Name -contains 'summary_path' -and -not [string]::IsNullOrWhiteSpace([string]$result.summary_path)) {
-            $summaryPath = [System.IO.Path]::GetFullPath([string]$result.summary_path)
-        } else {
-            $summaryPath = Join-Path $sessionRoot 'runtime-summary.json'
+        $reportedSessionRoot = [System.IO.Path]::GetFullPath([string]$result.session_root)
+        if (-not [string]::Equals($reportedSessionRoot, $expectedSessionRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw 'runtime entrypoint returned session_root outside the live governance contract.'
         }
+        if (
+            -not ($result.PSObject.Properties.Name -contains 'summary_path') -or
+            $result.summary_path -isnot [string] -or
+            [string]::IsNullOrWhiteSpace([string]$result.summary_path)
+        ) {
+            throw 'runtime entrypoint must return summary_path.'
+        }
+        $reportedSummaryPath = [System.IO.Path]::GetFullPath([string]$result.summary_path)
+        if (-not [string]::Equals($reportedSummaryPath, $expectedSummaryPath, [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw 'runtime entrypoint returned summary_path outside the live governance contract.'
+        }
+        $sessionRoot = $expectedSessionRoot
+        $summaryPath = $expectedSummaryPath
         $receiptPath = Join-Path $sessionRoot 'host-launch-receipt.json'
 
         Assert-CanonicalTruthArtifacts -SessionRoot $sessionRoot

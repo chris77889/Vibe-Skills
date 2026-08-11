@@ -12,10 +12,13 @@ from unittest import mock
 from pathlib import Path
 from typing import Any
 
+from tests.runtime_neutral.live_contract_fixtures import (
+    seed_live_document_contract as _seed_live_document_contract,
+)
+
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKSPACE_DRIVER = REPO_ROOT / "scripts" / "runtime" / "workspace_memory_driver.py"
-
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -85,6 +88,7 @@ class MemoryIngestNoiseFiltersTests(unittest.TestCase):
             session_root = temp_root / "session"
             repo_root.mkdir(parents=True, exist_ok=True)
             session_root.mkdir(parents=True, exist_ok=True)
+            _seed_live_document_contract(repo_root)
 
             noisy_write = run_workspace_driver(
                 lane="ruflo",
@@ -130,6 +134,7 @@ class MemoryIngestNoiseFiltersTests(unittest.TestCase):
             session_root = temp_root / "session"
             repo_root.mkdir(parents=True, exist_ok=True)
             session_root.mkdir(parents=True, exist_ok=True)
+            _seed_live_document_contract(repo_root)
 
             mixed_write = run_workspace_driver(
                 lane="serena",
@@ -177,6 +182,7 @@ class MemoryIngestNoiseFiltersTests(unittest.TestCase):
             session_root = temp_root / "session"
             repo_root.mkdir(parents=True, exist_ok=True)
             session_root.mkdir(parents=True, exist_ok=True)
+            _seed_live_document_contract(repo_root)
 
             write_result = run_workspace_driver(
                 lane="serena",

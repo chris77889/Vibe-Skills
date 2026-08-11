@@ -168,6 +168,13 @@
     },
     "manifest_path": "manifest.json",
     "legacy_compatibility_path": "legacy-compatibility.json",
+    "session_receipts": {
+      "root": "outputs/runtime/vibe-sessions",
+      "owner": "runtime",
+      "retention": "workspace_local",
+      "copy_to_artifact_sink": true
+    },
+    "legacy_projection_root": "vibe/runs",
     "legacy_documentation_roots": [
       "docs/requirements",
       "docs/plans"

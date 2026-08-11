@@ -91,6 +91,13 @@ def _contract_payload(
             },
             "manifest_path": "manifest.json",
             "legacy_compatibility_path": "legacy-compatibility.json",
+            "session_receipts": {
+                "root": "outputs/runtime/vibe-sessions",
+                "owner": "runtime",
+                "retention": "workspace_local",
+                "copy_to_artifact_sink": True,
+            },
+            "legacy_projection_root": "vibe/runs",
             "legacy_documentation_roots": ["docs/requirements", "docs/plans"],
             "legacy_removal_release": "4.1.0",
             "legacy_write_mode": "dual_write",
@@ -119,6 +126,7 @@ def _run_manifest_payload() -> dict:
             "removal_release": "4.1.0",
             "documentation_roots": ["docs/requirements", "docs/plans"],
             "writes": [],
+            "write_records": [],
             "observable": True,
         },
     }
@@ -440,6 +448,7 @@ def test_run_artifact_manifest_requires_complete_artifact_set() -> None:
         "primary_document_paths",
         "manifest_path",
         "legacy_compatibility_path",
+        "legacy_projection_root",
         "legacy_documentation_roots",
         "legacy_removal_release",
         "legacy_write_mode",
@@ -450,6 +459,53 @@ def test_artifact_sink_rejects_missing_cutover_fields(field: str) -> None:
     payload["artifact_sink"].pop(field)
 
     with pytest.raises(ValueError, match=field):
+        LiveGovernanceContract.model_validate(payload)
+
+
+def test_artifact_sink_requires_an_explicit_session_receipt_boundary() -> None:
+    payload = _contract_payload()
+    payload["artifact_sink"].pop("session_receipts")
+
+    with pytest.raises(ValueError, match="session_receipts"):
+        LiveGovernanceContract.model_validate(payload)
+
+
+def test_session_receipt_contract_is_publicly_exported() -> None:
+    assert vgo_contracts.SessionReceiptContract is not None
+    assert vgo_contracts.SESSION_RECEIPT_OWNER == "runtime"
+    assert vgo_contracts.SESSION_RECEIPT_RETENTION == "workspace_local"
+
+
+def test_session_receipt_contract_resolves_the_declared_run_root(
+    tmp_path: Path,
+) -> None:
+    payload = _contract_payload()
+    payload["artifact_sink"]["session_receipts"]["root"] = (
+        "runtime/session-receipts"
+    )
+    contract = LiveGovernanceContract.model_validate(payload)
+
+    assert contract.artifact_sink.session_receipts.resolve_run_root(
+        tmp_path,
+        "run-001",
+    ) == (tmp_path / "runtime" / "session-receipts" / "run-001").resolve()
+
+
+@pytest.mark.parametrize(
+    "artifact_root",
+    [
+        "docs/requirements",
+        "docs/requirements/runs",
+        "docs/plans/archive",
+    ],
+)
+def test_artifact_sink_rejects_historical_documentation_roots(
+    artifact_root: str,
+) -> None:
+    payload = _contract_payload()
+    payload["artifact_sink"]["root"] = artifact_root
+
+    with pytest.raises(ValueError, match="historical documentation roots"):
         LiveGovernanceContract.model_validate(payload)
 
 
@@ -482,6 +538,27 @@ def test_disabled_legacy_compatibility_rejects_declared_writes() -> None:
     ]
 
     with pytest.raises(ValueError, match="disabled"):
+        contract.validate_run_artifact_manifest(manifest_payload)
+
+
+def test_legacy_compatibility_rejects_writes_outside_declared_roots() -> None:
+    contract = LiveGovernanceContract.model_validate(_contract_payload())
+    manifest_payload = _run_manifest_payload()
+    manifest_payload["legacy_compatibility"]["writes"] = ["outputs/random.md"]
+
+    with pytest.raises(ValueError, match="declared legacy compatibility roots"):
+        contract.validate_run_artifact_manifest(manifest_payload)
+
+
+def test_legacy_compatibility_requires_a_record_for_every_write() -> None:
+    contract = LiveGovernanceContract.model_validate(_contract_payload())
+    manifest_payload = _run_manifest_payload()
+    manifest_payload["legacy_compatibility"]["writes"] = [
+        "docs/requirements/legacy.md"
+    ]
+    manifest_payload["legacy_compatibility"].pop("write_records")
+
+    with pytest.raises(ValueError, match="write_records"):
         contract.validate_run_artifact_manifest(manifest_payload)
 
 

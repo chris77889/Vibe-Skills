@@ -3,6 +3,7 @@ param(
     [string]$Mode = 'interactive_governed',
     [string]$RunId = '',
     [string]$ArtifactRoot = '',
+    [AllowEmptyString()] [string]$WorkspaceRoot = '',
     [AllowEmptyString()] [string]$HostDecisionJson = ''
 )
 
@@ -16,7 +17,7 @@ if ([string]::IsNullOrWhiteSpace($RunId)) {
     $RunId = New-VibeRunId
 }
 
-$sessionRoot = Ensure-VibeSessionRoot -RepoRoot $runtime.repo_root -RunId $RunId -Runtime $runtime -ArtifactRoot $ArtifactRoot
+$sessionRoot = Ensure-VibeSessionRoot -RepoRoot $runtime.repo_root -RunId $RunId -Runtime $runtime -WorkspaceRoot $WorkspaceRoot -ArtifactRoot $ArtifactRoot
 $hostDecision = ConvertFrom-VibeHostDecisionJson -HostDecisionJson $HostDecisionJson
 $intentContract = New-VibeIntentContractObject -Task $Task -Mode $Mode -HostDecision $hostDecision
 $receiptPath = Join-Path $sessionRoot 'intent-contract.json'

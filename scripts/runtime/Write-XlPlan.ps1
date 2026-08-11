@@ -124,7 +124,7 @@ if ([string]::IsNullOrWhiteSpace($RunId)) {
 }
 
 $artifactContract = Get-VibeArtifactContractDescriptor -RepoRoot $runtime.repo_root -RunId $RunId -WorkspaceRoot $WorkspaceRoot -ArtifactRoot $ArtifactRoot
-$sessionRoot = Ensure-VibeSessionRoot -RepoRoot $runtime.repo_root -RunId $RunId -Runtime $runtime -ArtifactRoot $ArtifactRoot
+$sessionRoot = Ensure-VibeSessionRoot -RepoRoot $runtime.repo_root -RunId $RunId -Runtime $runtime -WorkspaceRoot $WorkspaceRoot -ArtifactRoot $ArtifactRoot
 $hierarchyState = Get-VibeHierarchyState `
     -GovernanceScope $GovernanceScope `
     -RunId $RunId `
@@ -194,6 +194,11 @@ $requestedStageStop = if (
 $requestedGradeFloorDisplay = if ([string]::IsNullOrWhiteSpace($requestedGradeFloor)) { 'none' } else { $requestedGradeFloor }
 $grade = Get-VibeInternalGrade -Task $Task -RequestedGradeFloor $requestedGradeFloor
 $isChildScope = ([string]$hierarchyState.governance_scope -eq 'child')
+Assert-VibeInheritedCanonicalDocumentPaths `
+    -HierarchyState $hierarchyState `
+    -RepoRoot $runtime.repo_root `
+    -WorkspaceRoot $WorkspaceRoot `
+    -ArtifactRoot $ArtifactRoot
 $planPath = if ($isChildScope) {
     if ([string]::IsNullOrWhiteSpace([string]$hierarchyState.inherited_execution_plan_path)) {
         throw 'Child-governed plan stage requires InheritedExecutionPlanPath.'
@@ -207,7 +212,7 @@ $planPath = if ($isChildScope) {
         -WorkspaceRoot $WorkspaceRoot
 }
 $primaryPlanPath = if ($isChildScope) {
-    $planPath
+    $null
 } else {
     [string]$artifactContract.paths.primary_plan
 }
@@ -215,17 +220,13 @@ $legacyDocumentationWrite = [bool](
     -not $isChildScope -and
     [string]$artifactContract.legacy_write_mode -eq 'dual_write'
 )
-$publishedPlanPath = $primaryPlanPath
+$publishedPlanPath = if ($isChildScope) { $planPath } else { $primaryPlanPath }
 $requirementPath = if (-not [string]::IsNullOrWhiteSpace($RequirementDocPath)) {
     $RequirementDocPath
 } elseif (-not $isChildScope) {
     [string]$artifactContract.paths.primary_requirement
 } else {
-    Get-VibeRequirementDocPath `
-        -RepoRoot $runtime.repo_root `
-        -Task $Task `
-        -ArtifactRoot $ArtifactRoot `
-        -WorkspaceRoot $WorkspaceRoot
+    [string]$hierarchyState.inherited_requirement_doc_path
 }
 $antiDriftDraft = Get-VgoAntiProxyGoalDriftPacketFromRequirementDoc -RequirementDocPath $requirementPath
 $requirementDocLines = if (Test-Path -LiteralPath $requirementPath) {
@@ -597,6 +598,7 @@ Write-VibeJsonArtifact -Path $receiptPath -Value $receipt
 
 [pscustomobject]@{
     run_id = $RunId
+    governance_scope = [string]$hierarchyState.governance_scope
     session_root = $sessionRoot
     execution_plan_path = $publishedPlanPath
     primary_plan_path = $primaryPlanPath

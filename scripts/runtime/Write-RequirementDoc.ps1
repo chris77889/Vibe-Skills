@@ -134,7 +134,7 @@ if ([string]::IsNullOrWhiteSpace($RunId)) {
 }
 
 $artifactContract = Get-VibeArtifactContractDescriptor -RepoRoot $runtime.repo_root -RunId $RunId -WorkspaceRoot $WorkspaceRoot -ArtifactRoot $ArtifactRoot
-$sessionRoot = Ensure-VibeSessionRoot -RepoRoot $runtime.repo_root -RunId $RunId -Runtime $runtime -ArtifactRoot $ArtifactRoot
+$sessionRoot = Ensure-VibeSessionRoot -RepoRoot $runtime.repo_root -RunId $RunId -Runtime $runtime -WorkspaceRoot $WorkspaceRoot -ArtifactRoot $ArtifactRoot
 $hierarchyState = Get-VibeHierarchyState `
     -GovernanceScope $GovernanceScope `
     -RunId $RunId `
@@ -153,6 +153,11 @@ if ($hasFrozenIntentContract) {
 }
 
 $isChildScope = ([string]$hierarchyState.governance_scope -eq 'child')
+Assert-VibeInheritedCanonicalDocumentPaths `
+    -HierarchyState $hierarchyState `
+    -RepoRoot $runtime.repo_root `
+    -WorkspaceRoot $WorkspaceRoot `
+    -ArtifactRoot $ArtifactRoot
 $docPath = if ($isChildScope) {
     if ([string]::IsNullOrWhiteSpace([string]$hierarchyState.inherited_requirement_doc_path)) {
         throw 'Child-governed requirement stage requires InheritedRequirementDocPath.'
@@ -166,7 +171,7 @@ $docPath = if ($isChildScope) {
         -WorkspaceRoot $WorkspaceRoot
 }
 $primaryRequirementPath = if ($isChildScope) {
-    $docPath
+    $null
 } else {
     [string]$artifactContract.paths.primary_requirement
 }
@@ -174,7 +179,7 @@ $legacyDocumentationWrite = [bool](
     -not $isChildScope -and
     [string]$artifactContract.legacy_write_mode -eq 'dual_write'
 )
-$publishedRequirementPath = $primaryRequirementPath
+$publishedRequirementPath = if ($isChildScope) { $docPath } else { $primaryRequirementPath }
 $antiDriftDraft = New-VgoAntiProxyGoalDriftDraft -PrimaryObjective $intentContract.goal
 $productAcceptanceCriteria = Get-VibeProductAcceptanceCriteria -IntentContract $intentContract
 $completionLanguagePolicy = Get-VibeCompletionLanguagePolicy
@@ -455,6 +460,7 @@ Write-VibeJsonArtifact -Path $receiptPath -Value $receipt
 
 [pscustomobject]@{
     run_id = $RunId
+    governance_scope = [string]$hierarchyState.governance_scope
     session_root = $sessionRoot
     requirement_doc_path = $publishedRequirementPath
     primary_requirement_path = $primaryRequirementPath

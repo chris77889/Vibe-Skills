@@ -10,10 +10,13 @@ import unittest
 import uuid
 from pathlib import Path
 
+from tests.runtime_neutral.live_contract_fixtures import (
+    seed_live_document_contract as _seed_live_document_contract,
+)
+
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DISCLOSURE_POLICY = json.loads((REPO_ROOT / "config" / "memory-disclosure-policy.json").read_text(encoding="utf-8"))
-
 
 def _ps_single_quote(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
@@ -465,6 +468,7 @@ class MemoryProgressiveDisclosureTests(unittest.TestCase):
                 "SERENA_PROJECT_KEY": "pytest-memory-disclosure-project",
             }
             workspace_root = temp_root / "workspace"
+            _seed_live_document_contract(workspace_root)
 
             run_governed_runtime(
                 "XL approved decision: keep api worker runtime continuity and graph relationship between api worker and planner.",
@@ -557,6 +561,7 @@ class MemoryProgressiveDisclosureTests(unittest.TestCase):
                 "SERENA_PROJECT_KEY": "pytest-memory-disclosure-docs",
             }
             workspace_root = temp_root / "workspace"
+            _seed_live_document_contract(workspace_root)
 
             run_governed_runtime(
                 "Approved decision: reuse bounded memory capsules for release planning and execution evidence.",

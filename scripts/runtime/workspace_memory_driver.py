@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import re
+import sys
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -14,6 +15,16 @@ if os.name == "nt":
     import msvcrt
 else:
     import fcntl
+
+
+CONTRACTS_SRC = Path(__file__).resolve().parents[2] / "packages" / "contracts" / "src"
+if CONTRACTS_SRC.is_dir() and str(CONTRACTS_SRC) not in sys.path:
+    sys.path.insert(0, str(CONTRACTS_SRC))
+
+from vgo_contracts.live_governance_contract import (  # noqa: E402
+    LiveGovernanceContract,
+    load_live_governance_contract_file,
+)
 
 
 LANE_KIND = {
@@ -253,7 +264,6 @@ def load_workspace_memory_policy_bundle(repo_root: Path) -> dict[str, Any]:
         "memory-ingest-policy",
         "memory-disclosure-policy",
         "workspace-memory-plane",
-        "live-document-contract",
     ):
         path = config_root / f"{name}.json"
         bundle[name.replace("-", "_")] = load_json(path) if path.exists() else {}
@@ -268,40 +278,49 @@ def _relative_runtime_contract(
     repo_root: Path,
     policy_bundle: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    contract = dict((policy_bundle or {}).get("live_document_contract") or {})
     contract_path = repo_root / "config" / "live-document-contract.json"
-    if not contract and contract_path.is_file():
-        contract = load_json(contract_path)
-    if not contract:
-        return {"session_root": "outputs/runtime/vibe-sessions"}
-    sink = contract.get("artifact_sink")
-    if not isinstance(sink, dict):
-        raise ValueError("live document contract must define artifact_sink")
-    required_fields = (
-        "root",
-        "artifact_paths",
-        "primary_document_paths",
-        "manifest_path",
-        "legacy_compatibility_path",
-        "legacy_documentation_roots",
-        "legacy_removal_release",
-        "legacy_write_mode",
-    )
-    missing = [field for field in required_fields if field not in sink]
-    if missing:
+    policy_bundle = policy_bundle or {}
+    if "live_document_contract" in policy_bundle:
+        raw_contract = policy_bundle["live_document_contract"]
+        if not isinstance(raw_contract, dict):
+            raise ValueError(
+                f"live governance artifact contract is required: {contract_path}: "
+                "contract payload must be an object"
+            )
+        try:
+            contract = LiveGovernanceContract.model_validate(raw_contract)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"live governance artifact contract is required: {contract_path}: {exc}"
+            ) from exc
+    elif contract_path.is_file():
+        try:
+            contract = load_live_governance_contract_file(contract_path)
+        except (OSError, TypeError, ValueError) as exc:
+            raise ValueError(
+                f"live governance artifact contract is required: {contract_path}: {exc}"
+            ) from exc
+    else:
         raise ValueError(
-            "artifact sink is missing descriptor fields: " + ", ".join(missing)
+            f"live governance artifact contract is required: {contract_path}"
         )
+    sink = contract.artifact_sink
+    legacy_roots = sink.legacy_documentation_root_map
+    session_receipts = sink.session_receipts.model_dump()
     return {
-        "artifact_sink_root": str(sink["root"]),
-        "artifact_paths": dict(sink["artifact_paths"]),
-        "primary_document_paths": dict(sink["primary_document_paths"]),
-        "manifest_path": str(sink["manifest_path"]),
-        "legacy_compatibility_path": str(sink["legacy_compatibility_path"]),
-        "session_root": "outputs/runtime/vibe-sessions",
-        "legacy_documentation_roots": list(sink["legacy_documentation_roots"]),
-        "legacy_removal_release": str(sink["legacy_removal_release"]),
-        "legacy_write_mode": str(sink["legacy_write_mode"]),
+        "artifact_sink_root": sink.root,
+        "legacy_requirement_root": legacy_roots["requirement"],
+        "legacy_execution_plan_root": legacy_roots["plan"],
+        "legacy_projection_root": sink.legacy_projection_root,
+        "artifact_paths": sink.artifact_path_map,
+        "primary_document_paths": sink.primary_document_path_map,
+        "manifest_path": sink.manifest_path,
+        "legacy_compatibility_path": sink.legacy_compatibility_path,
+        "session_root": session_receipts["root"],
+        "session_receipts": session_receipts,
+        "legacy_documentation_roots": list(sink.legacy_documentation_roots),
+        "legacy_removal_release": sink.legacy_removal_release,
+        "legacy_write_mode": sink.legacy_write_mode,
     }
 
 

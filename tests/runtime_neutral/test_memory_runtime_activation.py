@@ -9,9 +9,12 @@ import unittest
 import uuid
 from pathlib import Path
 
+from tests.runtime_neutral.live_contract_fixtures import (
+    seed_live_document_contract as _seed_live_document_contract,
+)
+
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-
 
 def ps_quote(value: object) -> str:
     return "'" + str(value).replace("'", "''") + "'"
@@ -261,6 +264,7 @@ def complete_module_execution(
 class MemoryRuntimeActivationTests(unittest.TestCase):
     def test_runtime_activation_report_keeps_required_stage_shape_and_owner_contract(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
+            _seed_live_document_contract(Path(tempdir))
             payload = run_governed_runtime(
                 "Audit current governed memory activation contracts before refactoring shared memory.",
                 artifact_root=Path(tempdir),
@@ -318,6 +322,7 @@ class MemoryRuntimeActivationTests(unittest.TestCase):
 
     def test_runtime_emits_stage_aware_memory_activation_report(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
+            _seed_live_document_contract(Path(tempdir))
             payload = run_governed_runtime(
                 "Plan and debug a governed runtime enhancement with long-horizon continuity needs.",
                 artifact_root=Path(tempdir),
@@ -405,6 +410,7 @@ class MemoryRuntimeActivationTests(unittest.TestCase):
             env["VIBE_MEMORY_BACKEND_ROOT"] = str(backend_root)
             env["SERENA_PROJECT_KEY"] = "pytest-memory-project"
             workspace_root = temp_root / "workspace"
+            _seed_live_document_contract(workspace_root)
 
             first = run_governed_runtime(
                 "XL approved decision: keep api worker runtime continuity and graph relationship between api worker and planner.",
@@ -476,6 +482,7 @@ class MemoryRuntimeActivationTests(unittest.TestCase):
     def test_runtime_records_backend_failures_when_workspace_broker_cannot_run(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             temp_root = Path(tempdir)
+            _seed_live_document_contract(temp_root)
             payload, run_id = run_governed_runtime_with_metadata(
                 "XL follow-up api worker continuity review with decision reuse and graph dependency recall.",
                 artifact_root=temp_root,
