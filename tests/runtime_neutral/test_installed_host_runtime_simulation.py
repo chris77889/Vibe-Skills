@@ -9,6 +9,10 @@ import unittest
 import uuid
 from pathlib import Path
 
+from tests.runtime_neutral.live_contract_fixtures import (
+    seed_live_document_contract as _seed_live_document_contract,
+)
+
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 INSTALL_SCRIPT_SH = REPO_ROOT / "install.sh"
@@ -28,7 +32,6 @@ HOST_HOME_ENV = {
     "openclaw": "VIBE_AGENTS_HOME",
     "opencode": "VIBE_AGENTS_HOME",
 }
-
 
 def resolve_powershell() -> str | None:
     candidates = [
@@ -497,6 +500,8 @@ class InstalledHostRuntimeSimulationTests(unittest.TestCase):
                     "SERENA_PROJECT_KEY": f"pytest-installed-{host_id}",
                     "VIBE_MEMORY_BACKEND_ROOT": str(backend_root),
                 }
+                workspace_root = target_root / "workspace"
+                _seed_live_document_contract(workspace_root)
 
                 first = run_installed_runtime(
                     installed_root,
@@ -504,7 +509,7 @@ class InstalledHostRuntimeSimulationTests(unittest.TestCase):
                     task=MEMORY_TASK_FIRST,
                     artifact_root=target_root / ".vibeskills" / "simulated-memory-run-1",
                     env=runtime_env,
-                    workspace_root=target_root / "workspace",
+                    workspace_root=workspace_root,
                 )
                 first = return_agent_module_execution(
                     installed_root,
@@ -512,7 +517,7 @@ class InstalledHostRuntimeSimulationTests(unittest.TestCase):
                     artifact_root=target_root / ".vibeskills" / "simulated-memory-run-1",
                     env=runtime_env,
                     payload=first,
-                    workspace_root=target_root / "workspace",
+                    workspace_root=workspace_root,
                 )
                 first_report = load_json(first["summary"]["artifacts"]["memory_activation_report"])
                 self.assertGreaterEqual(len(first_report["stages"]), 5, host_id)
@@ -529,7 +534,7 @@ class InstalledHostRuntimeSimulationTests(unittest.TestCase):
                     task=MEMORY_TASK_SECOND,
                     artifact_root=target_root / ".vibeskills" / "simulated-memory-run-2",
                     env=runtime_env,
-                    workspace_root=target_root / "workspace",
+                    workspace_root=workspace_root,
                 )
                 second = return_agent_module_execution(
                     installed_root,
@@ -537,7 +542,7 @@ class InstalledHostRuntimeSimulationTests(unittest.TestCase):
                     artifact_root=target_root / ".vibeskills" / "simulated-memory-run-2",
                     env=runtime_env,
                     payload=second,
-                    workspace_root=target_root / "workspace",
+                    workspace_root=workspace_root,
                 )
                 second_summary = second["summary"]
                 second_report = load_json(second_summary["artifacts"]["memory_activation_report"])

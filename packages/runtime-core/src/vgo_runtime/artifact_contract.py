@@ -6,7 +6,7 @@ import platform
 import subprocess
 import sys
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from shutil import copy2
 from typing import Any
 
@@ -15,9 +15,11 @@ if CONTRACTS_SRC.is_dir() and str(CONTRACTS_SRC) not in sys.path:
     sys.path.insert(0, str(CONTRACTS_SRC))
 
 from vgo_contracts.live_governance_contract import (  # noqa: E402
+    LIVE_GOVERNANCE_CONTRACT_RELPATH,
     LiveGovernanceContract,
     RunArtifactManifest,
-    load_live_governance_contract,
+    load_live_governance_contract_file,
+    normalize_legacy_write_destination,
 )
 
 
@@ -27,6 +29,7 @@ class RuntimeArtifactProjection:
 
     contract: LiveGovernanceContract
     workspace_root: Path
+    session_root: Path
     run_id: str
     run_root: Path
     artifact_paths: dict[str, Path]
@@ -59,18 +62,74 @@ def _assert_no_symlink_components(*, root: Path, path: Path, label: str) -> None
 
 
 def _load_contract(repo_root: Path) -> LiveGovernanceContract:
+    contract_path = repo_root.resolve() / LIVE_GOVERNANCE_CONTRACT_RELPATH
     try:
-        return load_live_governance_contract(repo_root.resolve())
-    except (FileNotFoundError, RuntimeError, ValueError) as exc:
+        return load_live_governance_contract_file(contract_path)
+    except (OSError, RuntimeError, TypeError, ValueError) as exc:
         raise RuntimeError(
-            f"live governance artifact contract is required: {exc}"
+            f"live governance artifact contract is required: {contract_path}: {exc}"
         ) from exc
+
+
+def _coerce_legacy_write_destination(
+    value: object,
+    *,
+    workspace_root: Path,
+    declared_roots: tuple[str, ...],
+) -> str:
+    """Convert caller paths to the contract's workspace-relative POSIX form."""
+    if not isinstance(value, str):
+        raise ValueError("legacy compatibility writes must be strings")
+    raw = value.strip()
+    if not raw:
+        raise ValueError("legacy compatibility writes must not contain empty paths")
+    candidate = Path(raw).expanduser()
+    is_absolute = candidate.is_absolute() or PureWindowsPath(raw).is_absolute()
+    if is_absolute:
+        resolved_workspace = workspace_root.resolve()
+        resolved_candidate = candidate.resolve()
+        try:
+            raw = resolved_candidate.relative_to(resolved_workspace).as_posix()
+        except ValueError as exc:
+            raise ValueError(
+                "legacy compatibility writes must remain within the workspace "
+                f"and use declared legacy compatibility roots: {value}"
+            ) from exc
+    return normalize_legacy_write_destination(raw, declared_roots)
+
+
+def load_runtime_artifact_contract(repo_root: str | Path) -> LiveGovernanceContract:
+    """Load the exact repo-owned live governance contract or fail closed."""
+    return _load_contract(Path(repo_root))
+
+
+def resolve_runtime_session_receipts_root(
+    *,
+    repo_root: str | Path,
+    artifact_root: str | Path,
+) -> Path:
+    contract = load_runtime_artifact_contract(repo_root)
+    return contract.artifact_sink.session_receipts.resolve_root(artifact_root)
+
+
+def resolve_runtime_session_root(
+    *,
+    repo_root: str | Path,
+    artifact_root: str | Path,
+    run_id: str,
+) -> Path:
+    contract = load_runtime_artifact_contract(repo_root)
+    return contract.artifact_sink.session_receipts.resolve_run_root(
+        artifact_root,
+        run_id,
+    )
 
 
 def resolve_runtime_artifact_projection(
     *,
     agent_root: Path,
     workspace_root: Path | None,
+    session_artifact_root: Path | None = None,
     run_id: str,
     repo_root: Path,
 ) -> RuntimeArtifactProjection:
@@ -78,18 +137,30 @@ def resolve_runtime_artifact_projection(
     resolved_workspace_root = (
         workspace_root.resolve() if workspace_root is not None else resolved_agent_root
     )
+    resolved_session_artifact_root = (
+        session_artifact_root.resolve()
+        if session_artifact_root is not None
+        else resolved_workspace_root
+    )
     normalized_run_id = str(run_id).strip()
     contract = _load_contract(repo_root.resolve())
     sink = contract.artifact_sink
-    normalized_workspace = resolved_workspace_root.as_posix().rstrip("/").casefold()
+    normalized_workspace = (
+        "/" + resolved_workspace_root.as_posix().strip("/").casefold() + "/"
+    )
     if any(
-        normalized_workspace.endswith("/" + legacy_root.casefold().rstrip("/"))
+        "/" + legacy_root.replace("\\", "/").strip("/").casefold() + "/"
+        in normalized_workspace
         for legacy_root in sink.legacy_documentation_roots
     ):
         raise ValueError(
             "historical documentation roots cannot be used as the artifact workspace"
         )
     run_root = sink.resolve_run_root(resolved_workspace_root, normalized_run_id)
+    session_root = sink.session_receipts.resolve_run_root(
+        resolved_session_artifact_root,
+        normalized_run_id,
+    )
     artifact_paths = sink.resolve_run_artifact_paths(
         resolved_workspace_root,
         normalized_run_id,
@@ -99,7 +170,7 @@ def resolve_runtime_artifact_projection(
         normalized_run_id,
     )
     legacy_run_root = (
-        resolved_agent_root / "vibe" / "runs" / normalized_run_id
+        resolved_agent_root / Path(sink.legacy_projection_root) / normalized_run_id
     )
     _assert_no_symlink_components(
         root=resolved_agent_root,
@@ -109,6 +180,7 @@ def resolve_runtime_artifact_projection(
     return RuntimeArtifactProjection(
         contract=contract,
         workspace_root=resolved_workspace_root,
+        session_root=session_root,
         run_id=normalized_run_id,
         run_root=run_root,
         artifact_paths=artifact_paths,
@@ -116,7 +188,9 @@ def resolve_runtime_artifact_projection(
         legacy_run_root=legacy_run_root,
         # Calls that omit workspace_root are the pre-contract Python API. Keep
         # a marked read-compatible projection until that API is removed.
-        legacy_projection_enabled=workspace_root is None,
+        legacy_projection_enabled=(
+            workspace_root is None and sink.legacy_write_mode != "disabled"
+        ),
     )
 
 
@@ -217,6 +291,61 @@ def write_runtime_artifact_bundle(
         "status": status,
         "proof": proof,
     }
+    declared_legacy_roots = (
+        *sink.legacy_documentation_roots,
+        sink.legacy_projection_root,
+    )
+    requested_legacy_writes = [
+        _coerce_legacy_write_destination(
+            destination,
+            workspace_root=projection.workspace_root,
+            declared_roots=declared_legacy_roots,
+        )
+        for destination in (legacy_writes or [])
+    ]
+    if projection.legacy_projection_enabled:
+        requested_legacy_writes.append(
+            (Path(sink.legacy_projection_root) / projection.run_id).as_posix()
+        )
+    resolved_legacy_writes = []
+    seen_legacy_writes: set[str] = set()
+    for destination in requested_legacy_writes:
+        folded_destination = destination.casefold()
+        if folded_destination not in seen_legacy_writes:
+            seen_legacy_writes.add(folded_destination)
+            resolved_legacy_writes.append(destination)
+    if sink.legacy_write_mode == "disabled" and resolved_legacy_writes:
+        raise ValueError("disabled legacy compatibility cannot declare writes")
+    compatibility = {
+        "mode": sink.legacy_write_mode,
+        "removal_release": sink.legacy_removal_release,
+        "documentation_roots": list(sink.legacy_documentation_roots),
+        "writes": resolved_legacy_writes,
+        "write_records": [
+            {
+                "destination": destination,
+                "mode": sink.legacy_write_mode,
+                "removal_release": sink.legacy_removal_release,
+            }
+            for destination in resolved_legacy_writes
+        ],
+        "observable": True,
+    }
+    manifest_payload = {
+        "schema_version": sink.schema_version,
+        "run_id": projection.run_id,
+        "artifact_root": projection.relative_run_root(),
+        "artifacts": {
+            kind: sink.artifact_path_map[kind] for kind in sink.required_artifacts
+        },
+        "commit_sha": _git_commit_sha(repo_root.resolve()),
+        "execution_environment": execution_environment(
+            repo_root=repo_root,
+            host_id=host_id,
+        ),
+        "legacy_compatibility": compatibility,
+    }
+    manifest = projection.contract.validate_run_artifact_manifest(manifest_payload)
     for kind in sink.required_artifacts:
         path = projection.artifact_paths[kind]
         _write_json(
@@ -236,32 +365,6 @@ def write_runtime_artifact_bundle(
             schema_version=sink.schema_version,
             payload=payloads[kind],
         )
-
-    resolved_legacy_writes = list(legacy_writes or [])
-    if sink.legacy_write_mode == "disabled" and resolved_legacy_writes:
-        raise ValueError("disabled legacy compatibility cannot declare writes")
-    compatibility = {
-        "mode": sink.legacy_write_mode,
-        "removal_release": sink.legacy_removal_release,
-        "documentation_roots": list(sink.legacy_documentation_roots),
-        "writes": resolved_legacy_writes,
-        "observable": True,
-    }
-    manifest_payload = {
-        "schema_version": sink.schema_version,
-        "run_id": projection.run_id,
-        "artifact_root": projection.relative_run_root(),
-        "artifacts": {
-            kind: sink.artifact_path_map[kind] for kind in sink.required_artifacts
-        },
-        "commit_sha": _git_commit_sha(repo_root.resolve()),
-        "execution_environment": execution_environment(
-            repo_root=repo_root,
-            host_id=host_id,
-        ),
-        "legacy_compatibility": compatibility,
-    }
-    manifest = projection.contract.validate_run_artifact_manifest(manifest_payload)
     _write_json(projection.manifest_path, manifest.model_dump())
     _write_json(
         projection.artifact_paths["legacy_compatibility"],
@@ -296,11 +399,19 @@ def _validated_run_tree_files(root: Path) -> list[Path]:
     return files
 
 
-def _copy_run_tree(*, source_root: Path, destination_root: Path) -> None:
+def _copy_run_tree(
+    *,
+    source_root: Path,
+    destination_root: Path,
+    reserved_destinations: set[Path] | None = None,
+) -> None:
     source_files = _validated_run_tree_files(source_root)
     _validated_run_tree_files(destination_root)
     destination_root.mkdir(parents=True, exist_ok=True)
     resolved_destination_root = destination_root.resolve(strict=True)
+    resolved_reserved_destinations = {
+        path.resolve(strict=False) for path in (reserved_destinations or set())
+    }
     for source in source_files:
         destination = destination_root / source.relative_to(source_root)
         if not destination.resolve(strict=False).is_relative_to(
@@ -309,6 +420,8 @@ def _copy_run_tree(*, source_root: Path, destination_root: Path) -> None:
             raise ValueError(
                 f"run artifact copy path resolves outside its root: {destination}"
             )
+        if destination.resolve(strict=False) in resolved_reserved_destinations:
+            continue
         destination.parent.mkdir(parents=True, exist_ok=True)
         _assert_no_symlink_components(
             root=destination_root,
@@ -320,6 +433,41 @@ def _copy_run_tree(*, source_root: Path, destination_root: Path) -> None:
                 f"run artifact trees must not contain symlinks: {destination}"
             )
         copy2(source, destination)
+
+
+def sync_session_receipts_to_run_artifact_sink(
+    projection: RuntimeArtifactProjection,
+    *,
+    session_root: str | Path,
+) -> None:
+    """Copy runtime-owned workspace-local session files into the run sink."""
+    if not projection.artifact_sink.session_receipts.copy_to_artifact_sink:
+        return
+    resolved_session_root = Path(session_root).resolve()
+    declared_session_root = projection.session_root.resolve()
+    if resolved_session_root != declared_session_root:
+        raise ValueError(
+            "session receipt source must match the contract-declared run root: "
+            f"{resolved_session_root} != {declared_session_root}"
+        )
+    resolved_run_root = projection.run_root.resolve()
+    session_prefix = resolved_session_root.parts
+    run_prefix = resolved_run_root.parts
+    if (
+        resolved_session_root == resolved_run_root
+        or session_prefix[: len(run_prefix)] == run_prefix
+        or run_prefix[: len(session_prefix)] == session_prefix
+    ):
+        return
+    reserved_destinations = {
+        *projection.artifact_paths.values(),
+        *projection.primary_document_paths.values(),
+    }
+    _copy_run_tree(
+        source_root=resolved_session_root,
+        destination_root=resolved_run_root,
+        reserved_destinations=reserved_destinations,
+    )
 
 
 def _mirror_legacy_projection(projection: RuntimeArtifactProjection) -> None:
@@ -372,9 +520,13 @@ def load_runtime_artifact_manifest(
 __all__ = [
     "RuntimeArtifactProjection",
     "execution_environment",
+    "load_runtime_artifact_contract",
     "load_runtime_artifact_manifest",
     "mirror_legacy_run_if_needed",
     "resolve_runtime_artifact_projection",
+    "resolve_runtime_session_receipts_root",
+    "resolve_runtime_session_root",
     "seed_canonical_run_from_legacy_if_needed",
+    "sync_session_receipts_to_run_artifact_sink",
     "write_runtime_artifact_bundle",
 ]

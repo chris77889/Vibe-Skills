@@ -23,6 +23,27 @@ def _write_json(path: Path, payload: dict) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
+def _seed_live_document_contract(
+    repo_root: Path,
+    *,
+    session_receipt_root: str = "outputs/runtime/vibe-sessions",
+) -> None:
+    payload = json.loads(
+        (REPO_ROOT / "config" / "live-document-contract.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    payload["artifact_sink"]["session_receipts"]["root"] = (
+        session_receipt_root
+    )
+    _write_json(repo_root / "config" / "live-document-contract.json", payload)
+
+
+@pytest.fixture(autouse=True)
+def _seed_default_live_document_contract(tmp_path: Path) -> None:
+    _seed_live_document_contract(tmp_path)
+
+
 def test_bounded_reentry_inherits_frozen_tdd_decision(tmp_path: Path) -> None:
     session_root = tmp_path / "outputs" / "runtime" / "vibe-sessions" / "source-run"
     _write_json(
@@ -368,6 +389,7 @@ def test_canonical_entry_writes_host_launch_receipt(
         host_id="codex",
         entry_id="vibe",
         prompt="plan runtime entry hardening",
+        run_id=run_id,
         requested_stage_stop="phase_cleanup",
         artifact_root=tmp_path,
     )
@@ -429,6 +451,71 @@ def test_canonical_entry_prewrites_launched_receipt_before_runtime_invocation(
     assert summary["requested_stage_stop"] == "phase_cleanup"
     assert summary["effective_requested_stage_stop"] == "requirement_doc"
     assert summary["stage_stop_source"] == "progressive_adjusted"
+
+
+def test_canonical_entry_uses_the_contract_session_receipt_root(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _seed_live_document_contract(
+        tmp_path,
+        session_receipt_root="runtime/session-receipts",
+    )
+    run_id = "contract-session-root"
+    artifact_root = tmp_path / "artifacts"
+    session_root = artifact_root / "runtime" / "session-receipts" / run_id
+
+    monkeypatch.setattr(
+        canonical_entry,
+        "resolve_canonical_vibe_contract",
+        lambda repo_root, host_id: {
+            "fallback_policy": "blocked",
+            "allow_skill_doc_fallback": False,
+        },
+    )
+
+    def fake_invoke_runtime(**kwargs: object) -> dict[str, object]:
+        launched_receipt = json.loads(
+            (session_root / "host-launch-receipt.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        assert launched_receipt["launch_status"] == "launched"
+        _write_valid_truth_artifacts(
+            session_root,
+            requested_stage_stop="requirement_doc",
+        )
+        return {
+            "run_id": run_id,
+            "session_root": str(session_root),
+            "summary_path": str(session_root / "runtime-summary.json"),
+            "summary": {"run_id": run_id},
+        }
+
+    monkeypatch.setattr(
+        canonical_entry,
+        "invoke_vibe_runtime_entrypoint",
+        fake_invoke_runtime,
+    )
+
+    result = canonical_entry.launch_canonical_vibe(
+        repo_root=tmp_path,
+        host_id="codex",
+        entry_id="vibe",
+        prompt="verify the contract-owned session root",
+        run_id=run_id,
+        artifact_root=artifact_root,
+    )
+
+    assert result.session_root == session_root.resolve()
+    assert result.host_launch_receipt_path == (
+        session_root / "host-launch-receipt.json"
+    ).resolve()
+    assert canonical_entry._runtime_summary_path_for_run_id(
+        artifact_root,
+        run_id,
+        repo_root=tmp_path,
+    ) == (session_root / "runtime-summary.json").resolve()
 
 
 def test_canonical_entry_progresses_public_vibe_to_requirement_boundary_on_first_entry(
@@ -1314,7 +1401,7 @@ def test_progressive_stage_stops_surfaces_malformed_local_entry_surface(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    (tmp_path / "config").mkdir()
+    (tmp_path / "config").mkdir(exist_ok=True)
     (tmp_path / "config" / "vibe-entry-surfaces.json").write_text("{not json", encoding="utf-8")
     monkeypatch.setattr(
         canonical_entry,
@@ -1479,6 +1566,7 @@ def test_canonical_entry_does_not_consult_host_specific_fallback_contract(
         host_id="codex",
         entry_id="vibe",
         prompt="x",
+        run_id=run_id,
         artifact_root=tmp_path,
     )
 
@@ -1515,6 +1603,7 @@ def test_canonical_entry_requires_minimum_truth_artifacts(
             host_id="codex",
             entry_id="vibe",
             prompt="x",
+            run_id=run_id,
             artifact_root=tmp_path,
         )
 
@@ -1542,6 +1631,7 @@ def test_canonical_entry_keeps_running_when_runtime_packet_host_label_drifts(
         host_id="codex",
         entry_id="vibe",
         prompt="x",
+        run_id=run_id,
         requested_stage_stop="phase_cleanup",
         artifact_root=tmp_path,
     )
@@ -1586,6 +1676,7 @@ def test_canonical_entry_uses_explicit_stage_stop_without_presentational_entry_i
         host_id="codex",
         entry_id="vibe",
         prompt="x",
+        run_id=run_id,
         requested_stage_stop="xl_plan",
         requested_grade_floor="XL",
         artifact_root=tmp_path,
@@ -1635,6 +1726,7 @@ def test_canonical_entry_rejects_incomplete_truth_packets_before_verifying(
             host_id="codex",
             entry_id="vibe",
             prompt="x",
+            run_id=run_id,
             requested_stage_stop="phase_cleanup",
             artifact_root=tmp_path,
         )
@@ -1672,6 +1764,7 @@ def test_canonical_entry_collapses_explicit_entry_hints_back_to_vibe(
         host_id="codex",
         entry_id="not-a-real-entry",
         prompt="x",
+        run_id=run_id,
         requested_stage_stop="phase_cleanup",
         artifact_root=tmp_path,
     )
@@ -1730,6 +1823,7 @@ def test_canonical_entry_rejects_when_runtime_packet_drops_requested_stop(
             host_id="codex",
             entry_id="vibe",
             prompt="x",
+            run_id=run_id,
             requested_stage_stop="xl_plan",
             artifact_root=tmp_path,
         )
@@ -1764,6 +1858,7 @@ def test_canonical_entry_accepts_current_skill_routing_truth_packet(
         host_id="codex",
         entry_id="vibe",
         prompt="x",
+        run_id=run_id,
         requested_stage_stop="requirement_doc",
         artifact_root=tmp_path,
     )
@@ -1806,6 +1901,7 @@ def test_canonical_entry_accepts_missing_skill_routing_when_module_assignments_i
         host_id="codex",
         entry_id="vibe",
         prompt="x",
+        run_id=run_id,
         requested_stage_stop="requirement_doc",
         artifact_root=tmp_path,
     )
@@ -1853,6 +1949,7 @@ def test_canonical_entry_rejects_when_runtime_packet_drops_requested_grade_floor
             host_id="codex",
             entry_id="vibe",
             prompt="x",
+            run_id=run_id,
             requested_stage_stop="xl_plan",
             requested_grade_floor="XL",
             artifact_root=tmp_path,
@@ -1888,6 +1985,7 @@ def test_canonical_entry_accepts_empty_canonical_router_host_id(
         host_id="codex",
         entry_id="vibe",
         prompt="x",
+        run_id=run_id,
         requested_stage_stop="phase_cleanup",
         artifact_root=tmp_path,
     )
@@ -1931,6 +2029,7 @@ def test_canonical_entry_accepts_missing_canonical_router_compatibility_mirror(
         host_id="codex",
         entry_id="vibe",
         prompt="x",
+        run_id=run_id,
         requested_stage_stop="phase_cleanup",
         artifact_root=tmp_path,
     )
@@ -1972,6 +2071,7 @@ def test_canonical_entry_rejects_empty_governance_capsule_runtime_authority(
             host_id="codex",
             entry_id="vibe",
             prompt="x",
+            run_id=run_id,
             requested_stage_stop="phase_cleanup",
             artifact_root=tmp_path,
         )
@@ -2010,6 +2110,7 @@ def test_canonical_entry_accepts_empty_divergence_runtime_authority_shadow(
         host_id="codex",
         entry_id="vibe",
         prompt="x",
+        run_id=run_id,
         requested_stage_stop="phase_cleanup",
         artifact_root=tmp_path,
     )
@@ -2053,6 +2154,7 @@ def test_canonical_entry_accepts_missing_divergence_shadow_compatibility_mirror(
         host_id="codex",
         entry_id="vibe",
         prompt="x",
+        run_id=run_id,
         requested_stage_stop="phase_cleanup",
         artifact_root=tmp_path,
     )
@@ -2092,6 +2194,7 @@ def test_canonical_entry_accepts_missing_divergence_router_skill_mirror(
         host_id="codex",
         entry_id="vibe",
         prompt="x",
+        run_id=run_id,
         requested_stage_stop="phase_cleanup",
         artifact_root=tmp_path,
     )
@@ -2136,6 +2239,7 @@ def test_canonical_entry_accepts_missing_route_snapshot_selected_skill_summary(
         host_id="codex",
         entry_id="vibe",
         prompt="x",
+        run_id=run_id,
         requested_stage_stop="phase_cleanup",
         artifact_root=tmp_path,
     )
@@ -2180,6 +2284,7 @@ def test_canonical_entry_accepts_missing_route_snapshot_packet_summary(
         host_id="codex",
         entry_id="vibe",
         prompt="x",
+        run_id=run_id,
         requested_stage_stop="phase_cleanup",
         artifact_root=tmp_path,
     )
@@ -2220,6 +2325,7 @@ def test_canonical_entry_accepts_module_truth_without_retired_decision(
         host_id="codex",
         entry_id="vibe",
         prompt="x",
+        run_id=run_id,
         requested_stage_stop="phase_cleanup",
         artifact_root=tmp_path,
     )
@@ -2263,6 +2369,7 @@ def test_canonical_entry_rejects_malformed_skill_routing_truth(
             host_id="codex",
             entry_id="vibe",
             prompt="x",
+            run_id=run_id,
             requested_stage_stop="phase_cleanup",
             artifact_root=tmp_path,
         )
@@ -2305,6 +2412,7 @@ def test_canonical_entry_accepts_mismatched_canonical_router_task_type_mirror(
         host_id="codex",
         entry_id="vibe",
         prompt="x",
+        run_id=run_id,
         requested_stage_stop="phase_cleanup",
         artifact_root=tmp_path,
     )
@@ -2348,6 +2456,7 @@ def test_canonical_entry_rejects_stage_lineage_without_terminal_stage(
             host_id="codex",
             entry_id="vibe",
             prompt="x",
+            run_id=run_id,
             requested_stage_stop="phase_cleanup",
             artifact_root=tmp_path,
         )
@@ -2357,6 +2466,10 @@ def test_bridge_forwards_entry_intent_stop_and_grade_to_runtime(tmp_path: Path) 
     powershell = shutil.which("pwsh") or shutil.which("powershell")
     if not powershell:
         pytest.skip("PowerShell executable not available in PATH")
+    _seed_live_document_contract(
+        tmp_path,
+        session_receipt_root="runtime/session-receipts",
+    )
 
     bridge_dir = tmp_path / "scripts" / "runtime"
     bridge_dir.mkdir(parents=True, exist_ok=True)
@@ -2364,6 +2477,16 @@ def test_bridge_forwards_entry_intent_stop_and_grade_to_runtime(tmp_path: Path) 
     bridge_path.write_text(
         (REPO_ROOT / "scripts" / "runtime" / "Invoke-VibeCanonicalEntry.ps1").read_text(encoding="utf-8"),
         encoding="utf-8",
+    )
+    shutil.copy2(
+        REPO_ROOT / "scripts" / "runtime" / "VibeRuntime.Common.ps1",
+        bridge_dir / "VibeRuntime.Common.ps1",
+    )
+    helper_dir = tmp_path / "scripts" / "common"
+    helper_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(
+        REPO_ROOT / "scripts" / "common" / "vibe-governance-helpers.ps1",
+        helper_dir / "vibe-governance-helpers.ps1",
     )
     fake_runtime_path = bridge_dir / "invoke-vibe-runtime.ps1"
     fake_runtime_path.write_text(
@@ -2377,26 +2500,29 @@ param(
   [string]$RunId = '',
   [string]$ArtifactRoot = ''
 )
-[System.IO.Directory]::CreateDirectory((Join-Path $PSScriptRoot 'session')) | Out-Null
+$repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\\..'))
+. (Join-Path $PSScriptRoot 'VibeRuntime.Common.ps1')
+$sessionRoot = Get-VibeSessionRoot -RepoRoot $repoRoot -RunId $RunId -ArtifactRoot $ArtifactRoot
+[System.IO.Directory]::CreateDirectory($sessionRoot) | Out-Null
 [System.IO.File]::WriteAllText(
-  (Join-Path $PSScriptRoot 'session\\runtime-input-packet.json'),
+  (Join-Path $sessionRoot 'runtime-input-packet.json'),
   "{`"entry_intent_id`":`"vibe`",`"agent_skill_organization`":{`"schema_version`":`"agent_skill_organization_v1`",`"selected_skills`":[{`"skill_id`":`"systematic-debugging`"}]},`"module_assignments`":{`"source`":`"agent_skill_organization`",`"units`":[{`"bound_skill`":`"systematic-debugging`"}]},`"canonical_router`":{`"host_id`":`"codex`",`"role`":`"compatibility_candidate_audit`"},`"route_snapshot`":{`"route_mode`":`"local_skill_overlay`"},`"skill_routing`":{`"candidates`":[{`"skill_id`":`"systematic-debugging`"}],`"rejected`":[]}}`n",
   [System.Text.UTF8Encoding]::new($false)
 )
 [System.IO.File]::WriteAllText(
-  (Join-Path $PSScriptRoot 'session\\governance-capsule.json'),
+  (Join-Path $sessionRoot 'governance-capsule.json'),
   "{`"runtime_selected_skill`":`"vibe`"}`n",
   [System.Text.UTF8Encoding]::new($false)
 )
 [System.IO.File]::WriteAllText(
-  (Join-Path $PSScriptRoot 'session\\stage-lineage.json'),
+  (Join-Path $sessionRoot 'stage-lineage.json'),
   "{`"stages`":[{`"name`":`"skeleton_check`"},{`"name`":`"deep_interview`"},{`"name`":`"requirement_doc`"},{`"name`":`"xl_plan`"}],`"last_stage_name`":`"xl_plan`"}`n",
   [System.Text.UTF8Encoding]::new($false)
 )
 [pscustomobject]@{
   run_id = $RunId
-  session_root = [string](Join-Path $PSScriptRoot 'session')
-  summary_path = [string](Join-Path $PSScriptRoot 'summary.json')
+  session_root = [string]$sessionRoot
+  summary_path = [string](Join-Path $sessionRoot 'runtime-summary.json')
   summary = [pscustomobject]@{
     received = [pscustomobject]@{
       EntryIntentId = if ([string]::IsNullOrWhiteSpace($EntryIntentId)) { $null } else { $EntryIntentId }
@@ -2798,6 +2924,7 @@ def test_canonical_entry_infers_skills_dir_from_installed_vibe_root(
 ) -> None:
     skills_dir = tmp_path / "skills"
     installed_vibe_root = skills_dir / "vibe"
+    _seed_live_document_contract(installed_vibe_root)
     skill_dir = installed_vibe_root / "skills" / "local" / "code-review"
     skill_dir.mkdir(parents=True, exist_ok=True)
     (installed_vibe_root / "SKILL.md").write_text("# Vibe\n", encoding="utf-8")
@@ -2835,7 +2962,22 @@ enabled: true
     )
 
     assert result.launch_mode == "local-agent-kernel"
-    assert result.session_root.parent == installed_vibe_root / "runs"
+    assert result.session_root.parent == (
+        installed_vibe_root
+        / ".vibeskills"
+        / "outputs"
+        / "runtime"
+        / "vibe-sessions"
+    )
+    run_root = installed_vibe_root / ".vibeskills" / "runs" / result.run_id
+    for name in (
+        "host-launch-receipt.json",
+        "runtime-input-packet.json",
+        "governance-capsule.json",
+        "stage-lineage.json",
+        "runtime-summary.json",
+    ):
+        assert (run_root / name).read_bytes() == (result.session_root / name).read_bytes()
     summary = json.loads(result.summary_path.read_text(encoding="utf-8"))
     assert summary["summary_source"] == "auto local agent root detection"
 
@@ -2989,6 +3131,7 @@ def test_launch_canonical_vibe_uses_corrected_repo_root(
     tmp_path: Path,
 ) -> None:
     corrected_root = tmp_path / "Vibe-Skills"
+    _seed_live_document_contract(corrected_root)
     session_root = tmp_path / "artifacts" / "outputs" / "runtime" / "vibe-sessions" / "run-1"
     decision = EntryRootDecision(
         repo_root=corrected_root,
@@ -3054,6 +3197,7 @@ def test_launch_canonical_vibe_uses_corrected_repo_root(
         host_id="codex",
         entry_id="vibe",
         prompt="repair route",
+        run_id="run-1",
         artifact_root=tmp_path / "artifacts",
     )
 

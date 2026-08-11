@@ -419,6 +419,8 @@ class RootChildHierarchyBridgeTests(unittest.TestCase):
 
             self.assertFalse(requirement_receipt["canonical_write_allowed"])
             self.assertFalse(plan_receipt["canonical_write_allowed"])
+            self.assertIsNone(requirement_receipt["primary_requirement_path"])
+            self.assertIsNone(plan_receipt["primary_plan_path"])
             self.assertEqual(
                 str(Path(root_artifacts["requirement_doc"]).resolve()),
                 str(Path(requirement_receipt["requirement_doc_path"]).resolve()),
@@ -485,6 +487,42 @@ class RootChildHierarchyBridgeTests(unittest.TestCase):
                     artifact_root=artifact_root,
                     delegation_envelope_path=envelope_path,
                     run_id="pytest-child-lane-runtime-" + uuid.uuid4().hex[:10],
+                )
+
+    def test_child_runtime_rejects_historical_inherited_document_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            artifact_root = Path(tempdir)
+            root_payload = run_governed_runtime(
+                "Root child historical path rejection seed.",
+                artifact_root=artifact_root,
+            )
+            root_summary = root_payload["summary"]
+            child_run_id = "pytest-child-lane-" + uuid.uuid4().hex[:10]
+            legacy_requirement = artifact_root / "docs" / "requirements" / "historical.md"
+            legacy_plan = artifact_root / "docs" / "plans" / "historical-plan.md"
+            legacy_requirement.parent.mkdir(parents=True, exist_ok=True)
+            legacy_plan.parent.mkdir(parents=True, exist_ok=True)
+            legacy_requirement.write_text("# legacy requirement\n", encoding="utf-8")
+            legacy_plan.write_text("# legacy plan\n", encoding="utf-8")
+            envelope_path = write_delegation_envelope_fixture(
+                artifact_root=artifact_root,
+                root_payload=root_payload,
+                child_run_id=child_run_id,
+            )
+            envelope = json.loads(envelope_path.read_text(encoding="utf-8"))
+            envelope["requirement_doc_path"] = str(legacy_requirement)
+            envelope["execution_plan_path"] = str(legacy_plan)
+            envelope_path.write_text(json.dumps(envelope, indent=2), encoding="utf-8")
+
+            with self.assertRaises(subprocess.CalledProcessError):
+                run_child_runtime(
+                    task="Child runtime must reject historical inherited paths.",
+                    root_run_id=str(root_summary["run_id"]),
+                    inherited_requirement_doc_path=legacy_requirement,
+                    inherited_execution_plan_path=legacy_plan,
+                    artifact_root=artifact_root,
+                    delegation_envelope_path=envelope_path,
+                    run_id=child_run_id,
                 )
 
 

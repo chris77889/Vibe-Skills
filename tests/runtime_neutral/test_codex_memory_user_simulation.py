@@ -11,6 +11,10 @@ from unittest import mock
 from pathlib import Path
 from typing import Mapping
 
+from tests.runtime_neutral.live_contract_fixtures import (
+    seed_live_document_contract as _seed_live_document_contract,
+)
+
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 INSTALL_SCRIPT = REPO_ROOT / "install.sh"
@@ -21,7 +25,6 @@ IRRELEVANT_DEPENDENCY = "audit-ledger"
 RUN_MEMORY_BENCHMARKS_ENV = "VIBESKILLS_RUN_MEMORY_BENCHMARKS"
 RUNTIME_INVOCATION_TIMEOUT_SECONDS = 240
 INSTALL_TIMEOUT_SECONDS = 180
-
 
 def _ps_single_quote(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
@@ -546,6 +549,7 @@ class CodexMemoryUserSimulationTests(unittest.TestCase):
             backend_root=backend_root,
         )
         workspace_root = target_root / "workspaces" / artifact_prefix
+        _seed_live_document_contract(workspace_root)
 
         for index, task in enumerate(seed_tasks):
             run_installed_runtime(
@@ -638,6 +642,7 @@ class CodexMemoryUserSimulationTests(unittest.TestCase):
                 "VIBE_MEMORY_BACKEND_ROOT": str(target_root / ".vibeskills" / "memory-backend"),
             }
             workspace_root = target_root / "workspaces" / "memory-sim"
+            _seed_live_document_contract(workspace_root)
 
             run_installed_runtime(
                 installed_root,
@@ -718,6 +723,7 @@ class CodexMemoryUserSimulationTests(unittest.TestCase):
                 "SERENA_PROJECT_KEY": "pytest-shared-workspace-hosts",
             }
             shared_workspace_root = temp_root / "shared-workspace"
+            _seed_live_document_contract(shared_workspace_root)
 
             run_repo_governed_runtime(
                 "XL approved decision: keep atlas-cache runtime continuity and graph relationship between atlas-cache and planner. $vibe",
@@ -760,6 +766,8 @@ class CodexMemoryUserSimulationTests(unittest.TestCase):
             target_b, installed_b, env_b = self._install_codex_context(temp_root, "codex-workspace-b")
             workspace_root_a = target_a / "workspace"
             workspace_root_b = target_b / "workspace"
+            _seed_live_document_contract(workspace_root_a)
+            _seed_live_document_contract(workspace_root_b)
 
             runtime_env_a = {
                 **env_a,
@@ -952,6 +960,8 @@ class CodexMemoryUserSimulationTests(unittest.TestCase):
                 )
                 workspace_root_a = target_a / "workspaces" / f"leak-{index}"
                 workspace_root_b = target_b / "workspaces" / f"leak-{index}"
+                _seed_live_document_contract(workspace_root_a)
+                _seed_live_document_contract(workspace_root_b)
                 run_installed_runtime(
                     installed_a,
                     task=f"XL approved decision: keep {topic} runtime continuity and graph relationship between {topic} and {dependency}. $vibe",

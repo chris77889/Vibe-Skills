@@ -3,6 +3,7 @@ param(
     [string]$Mode = 'interactive_governed',
     [string]$RunId = '',
     [string]$ArtifactRoot = '',
+    [AllowEmptyString()] [string]$WorkspaceRoot = '',
     [switch]$ExecuteGovernanceCleanup,
     [switch]$ApplyManagedNodeCleanup
 )
@@ -19,7 +20,7 @@ if ([string]::IsNullOrWhiteSpace($RunId)) {
     $RunId = New-VibeRunId
 }
 
-$sessionRoot = Ensure-VibeSessionRoot -RepoRoot $runtime.repo_root -RunId $RunId -Runtime $runtime -ArtifactRoot $ArtifactRoot
+$sessionRoot = Ensure-VibeSessionRoot -RepoRoot $runtime.repo_root -RunId $RunId -Runtime $runtime -WorkspaceRoot $WorkspaceRoot -ArtifactRoot $ArtifactRoot
 $shouldExecuteGovernanceCleanup = [bool]$ExecuteGovernanceCleanup
 $shouldExecuteBoundedDefaultCleanup = $false
 foreach ($defaultMode in @($runtime.cleanup_policy.bounded_default_modes)) {

@@ -156,6 +156,14 @@ function Complete-VibeGovernedRuntimeStop {
     }
     $requirementDocPath = if (
         $Requirement -and
+        $Requirement.PSObject.Properties.Name -contains 'governance_scope' -and
+        [string]$Requirement.governance_scope -eq 'child' -and
+        $Requirement.PSObject.Properties.Name -contains 'requirement_doc_path' -and
+        -not [string]::IsNullOrWhiteSpace([string]$Requirement.requirement_doc_path)
+    ) {
+        [string]$Requirement.requirement_doc_path
+    } elseif (
+        $Requirement -and
         $Requirement.PSObject.Properties.Name -contains 'primary_requirement_path' -and
         -not [string]::IsNullOrWhiteSpace([string]$Requirement.primary_requirement_path)
     ) {
@@ -194,6 +202,14 @@ function Complete-VibeGovernedRuntimeStop {
         ''
     }
     $executionPlanPath = if (
+        $Plan -and
+        $Plan.PSObject.Properties.Name -contains 'governance_scope' -and
+        [string]$Plan.governance_scope -eq 'child' -and
+        $Plan.PSObject.Properties.Name -contains 'execution_plan_path' -and
+        -not [string]::IsNullOrWhiteSpace([string]$Plan.execution_plan_path)
+    ) {
+        [string]$Plan.execution_plan_path
+    } elseif (
         $Plan -and
         $Plan.PSObject.Properties.Name -contains 'primary_plan_path' -and
         -not [string]::IsNullOrWhiteSpace([string]$Plan.primary_plan_path)
@@ -760,6 +776,7 @@ if (-not [string]::IsNullOrWhiteSpace($ModuleExecutionJsonFile)) {
         -Mode $Mode `
         -RunId $RunId `
         -ArtifactRoot $artifactBaseRoot `
+        -WorkspaceRoot $resolvedWorkspaceRoot `
         -ExecuteGovernanceCleanup:$ExecuteGovernanceCleanup `
         -ApplyManagedNodeCleanup:$ApplyManagedNodeCleanup
     $stageLineage = Add-VibeStageLineageEntry `
@@ -1068,7 +1085,7 @@ $runtimeInputPacket = if ($runtimeInput -and $runtimeInput.PSObject.Properties.N
     $null
 }
 $requestedStop = Resolve-VibeRequestedStageStop -RequestedStageStop $(if ($runtimeInputPacket) { [string]$runtimeInputPacket.requested_stage_stop } else { '' })
-$interview = & (Join-Path $PSScriptRoot 'Invoke-DeepInterview.ps1') -Task $Task -Mode $Mode -RunId $RunId -ArtifactRoot $artifactBaseRoot -HostDecisionJson $HostDecisionJson
+$interview = & (Join-Path $PSScriptRoot 'Invoke-DeepInterview.ps1') -Task $Task -Mode $Mode -RunId $RunId -ArtifactRoot $artifactBaseRoot -WorkspaceRoot $resolvedWorkspaceRoot -HostDecisionJson $HostDecisionJson
 $stageLineage = Add-VibeStageLineageEntry `
     -SessionRoot ([string]$skeleton.session_root) `
     -RunId $RunId `
@@ -1262,6 +1279,7 @@ foreach ($key in @('GovernanceScope', 'RootRunId', 'ParentRunId', 'ParentUnitId'
     }
 }
 $executeArgs.ExecutionMemoryContextPath = $executionMemoryContext.context_path
+$executeArgs.WorkspaceRoot = $resolvedWorkspaceRoot
 $execute = & (Join-Path $PSScriptRoot 'Invoke-PlanExecute.ps1') @executeArgs
 $stageLineage = Add-VibeStageLineageEntry `
     -SessionRoot ([string]$skeleton.session_root) `
@@ -1347,7 +1365,7 @@ if ($requestedStop -eq 'plan_execute') {
         -ExecutionManifestDocument $executionManifestDocument `
         -DelegationValidation $delegationValidation
 }
-$cleanup = & (Join-Path $PSScriptRoot 'Invoke-PhaseCleanup.ps1') -Task $Task -Mode $Mode -RunId $RunId -ArtifactRoot $artifactBaseRoot -ExecuteGovernanceCleanup:$ExecuteGovernanceCleanup -ApplyManagedNodeCleanup:$ApplyManagedNodeCleanup
+$cleanup = & (Join-Path $PSScriptRoot 'Invoke-PhaseCleanup.ps1') -Task $Task -Mode $Mode -RunId $RunId -ArtifactRoot $artifactBaseRoot -WorkspaceRoot $resolvedWorkspaceRoot -ExecuteGovernanceCleanup:$ExecuteGovernanceCleanup -ApplyManagedNodeCleanup:$ApplyManagedNodeCleanup
 $stageLineage = Add-VibeStageLineageEntry `
     -SessionRoot ([string]$skeleton.session_root) `
     -RunId $RunId `

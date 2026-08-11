@@ -10,6 +10,10 @@ import unittest
 from pathlib import Path
 from typing import Any
 
+from tests.runtime_neutral.live_contract_fixtures import (
+    seed_live_document_contract as _seed_live_document_contract,
+)
+
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 RUNTIME_CORE_SRC = REPO_ROOT / "packages" / "runtime-core" / "src"
@@ -22,6 +26,14 @@ GOVERNANCE_HELPERS = REPO_ROOT / "scripts" / "common" / "vibe-governance-helpers
 RUNTIME_COMMON = REPO_ROOT / "scripts" / "runtime" / "VibeRuntime.Common.ps1"
 MEMORY_BACKENDS_COMMON = REPO_ROOT / "scripts" / "runtime" / "VibeMemoryBackends.Common.ps1"
 WORKSPACE_MEMORY_COMMON = REPO_ROOT / "scripts" / "runtime" / "VibeWorkspaceMemory.Common.ps1"
+
+def _seed_workspace_driver_dependencies(workspace_root: Path) -> None:
+    _seed_live_document_contract(workspace_root)
+    shutil.copytree(
+        REPO_ROOT / "packages" / "contracts",
+        workspace_root / "packages" / "contracts",
+        dirs_exist_ok=True,
+    )
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
@@ -266,6 +278,7 @@ class WorkspaceSharedMemoryPlaneTests(unittest.TestCase):
             session_root = temp_root / "session"
             repo_root.mkdir(parents=True, exist_ok=True)
             session_root.mkdir(parents=True, exist_ok=True)
+            _seed_workspace_driver_dependencies(repo_root)
             runtime_script_root = repo_root / "scripts" / "runtime"
             runtime_script_root.mkdir(parents=True, exist_ok=True)
             (runtime_script_root / "memory_backend_driver.py").write_text(
@@ -352,6 +365,7 @@ class WorkspaceSharedMemoryPlaneTests(unittest.TestCase):
             session_root = temp_root / "session"
             repo_root.mkdir(parents=True, exist_ok=True)
             session_root.mkdir(parents=True, exist_ok=True)
+            _seed_workspace_driver_dependencies(repo_root)
             runtime_script_root = repo_root / "scripts" / "runtime"
             runtime_script_root.mkdir(parents=True, exist_ok=True)
             (runtime_script_root / "workspace_memory_driver.py").write_text(
@@ -452,6 +466,7 @@ class WorkspaceSharedMemoryPlaneTests(unittest.TestCase):
             session_root = temp_root / "session"
             repo_root.mkdir(parents=True, exist_ok=True)
             session_root.mkdir(parents=True, exist_ok=True)
+            _seed_live_document_contract(repo_root)
 
             result = run_driver(
                 COMPAT_DRIVER,
@@ -484,6 +499,7 @@ class WorkspaceSharedMemoryPlaneTests(unittest.TestCase):
             session_root = temp_root / "session"
             repo_root.mkdir(parents=True, exist_ok=True)
             session_root.mkdir(parents=True, exist_ok=True)
+            _seed_live_document_contract(repo_root)
 
             serena_write = run_driver(
                 COMPAT_DRIVER,
@@ -575,6 +591,7 @@ class WorkspaceSharedMemoryPlaneTests(unittest.TestCase):
             session_root = temp_root / "session"
             repo_root.mkdir(parents=True, exist_ok=True)
             session_root.mkdir(parents=True, exist_ok=True)
+            _seed_live_document_contract(repo_root)
             legacy_store_path = temp_root / "legacy-ruflo.jsonl"
 
             result = run_driver(
@@ -613,6 +630,7 @@ class WorkspaceSharedMemoryPlaneTests(unittest.TestCase):
             session_root = temp_root / "session"
             repo_root.mkdir(parents=True, exist_ok=True)
             session_root.mkdir(parents=True, exist_ok=True)
+            _seed_live_document_contract(repo_root)
 
             run_driver(
                 WORKSPACE_DRIVER,
@@ -651,6 +669,7 @@ class CodexMemoryUserSimulationTests(unittest.TestCase):
             session_root = temp_root / "session"
             repo_root.mkdir(parents=True, exist_ok=True)
             session_root.mkdir(parents=True, exist_ok=True)
+            _seed_live_document_contract(repo_root)
 
             run_driver(
                 COMPAT_DRIVER,
@@ -701,6 +720,7 @@ class CodexMemoryUserSimulationTests(unittest.TestCase):
             session_root = temp_root / "session"
             repo_root.mkdir(parents=True, exist_ok=True)
             session_root.mkdir(parents=True, exist_ok=True)
+            _seed_live_document_contract(repo_root)
 
             run_driver(
                 COMPAT_DRIVER,
@@ -748,6 +768,7 @@ class CodexMemoryUserSimulationTests(unittest.TestCase):
             repo_root.mkdir(parents=True, exist_ok=True)
             codex_session_root.mkdir(parents=True, exist_ok=True)
             claude_session_root.mkdir(parents=True, exist_ok=True)
+            _seed_live_document_contract(repo_root)
 
             codex_identity = build_workspace_memory_identity(workspace_root=repo_root, host_id="codex").model_dump()
             claude_identity = build_workspace_memory_identity(workspace_root=repo_root, host_id="claude-code").model_dump()
@@ -800,6 +821,8 @@ class CodexMemoryUserSimulationTests(unittest.TestCase):
             workspace_b.mkdir(parents=True, exist_ok=True)
             session_a.mkdir(parents=True, exist_ok=True)
             session_b.mkdir(parents=True, exist_ok=True)
+            _seed_live_document_contract(workspace_a)
+            _seed_live_document_contract(workspace_b)
 
             run_driver(
                 COMPAT_DRIVER,

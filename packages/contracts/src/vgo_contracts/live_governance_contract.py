@@ -33,6 +33,8 @@ ALLOWED_EXCLUDED_PREFIXES = frozenset({"references/provenance/"})
 PULL_REQUEST_PROOF_RETENTION_DAYS = 30
 MAIN_PROOF_RETENTION_DAYS = 90
 FORMAL_RELEASE_PROOF_DESTINATION = "github_release"
+SESSION_RECEIPT_OWNER = "runtime"
+SESSION_RECEIPT_RETENTION = "workspace_local"
 
 _SLUG_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
 _WINDOWS_DRIVE_PATTERN = re.compile(r"^[A-Za-z]:")
@@ -41,25 +43,44 @@ _MARKDOWN_LINK_PATTERN = re.compile(r"(?<!!)\[[^\]]*\]\(([^)]+)\)")
 _HTML_LINK_PATTERN = re.compile(r'''href=["']([^"']+)["']''', re.IGNORECASE)
 
 
+def _require_string(value: Any, field_name: str) -> str:
+    if not isinstance(value, str):
+        raise ValueError(f"{field_name} must be a string")
+    return value
+
+
+def _require_integer(value: Any, field_name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"{field_name} must be an integer")
+    return value
+
+
 def _normalize_relative_path(value: Any, field_name: str, *, allow_dot: bool = False) -> str:
-    normalized = str(value or "").replace("\\", "/").strip()
+    normalized = _require_string(value, field_name).replace("\\", "/").strip()
     if not normalized:
         raise ValueError(f"{field_name} must be a non-empty relative path")
     if normalized == ".":
         if allow_dot:
             return normalized
         raise ValueError(f"{field_name} must name a relative path below '.'")
+    normalized = normalized.rstrip("/")
+    if not normalized:
+        raise ValueError(f"{field_name} must be a non-empty relative path")
     if normalized.startswith("/") or _WINDOWS_DRIVE_PATTERN.match(normalized):
         raise ValueError(f"{field_name} must be relative: {normalized}")
-    normalized = normalized.rstrip("/")
     path = PurePosixPath(normalized)
     if path.is_absolute() or ".." in path.parts:
         raise ValueError(f"{field_name} must be a safe relative path: {normalized}")
-    return path.as_posix()
+    canonical = path.as_posix()
+    if canonical == ".":
+        if allow_dot:
+            return canonical
+        raise ValueError(f"{field_name} must name a relative path below '.'")
+    return canonical
 
 
 def _normalize_slug(value: Any, field_name: str) -> str:
-    normalized = str(value or "").strip().lower()
+    normalized = _require_string(value, field_name).strip().lower()
     if not _SLUG_PATTERN.fullmatch(normalized):
         raise ValueError(f"{field_name} must be a lowercase identifier: {value}")
     return normalized
@@ -68,7 +89,7 @@ def _normalize_slug(value: Any, field_name: str) -> str:
 def _normalize_unique_strings(values: Any, field_name: str) -> tuple[str, ...]:
     if not isinstance(values, list):
         raise ValueError(f"{field_name} must be a list")
-    normalized = tuple(str(item or "").strip() for item in values)
+    normalized = tuple(_require_string(item, f"{field_name} entry").strip() for item in values)
     if any(not item for item in normalized):
         raise ValueError(f"{field_name} must not contain empty values")
     if len(set(normalized)) != len(normalized):
@@ -77,10 +98,39 @@ def _normalize_unique_strings(values: Any, field_name: str) -> tuple[str, ...]:
 
 
 def _normalize_run_id(value: Any, field_name: str = "run_id") -> str:
-    normalized = str(value or "").strip()
+    normalized = _require_string(value, field_name).strip()
     if not _RUN_ID_PATTERN.fullmatch(normalized):
         raise ValueError(f"{field_name} must be a safe path segment")
     return normalized
+
+
+def normalize_legacy_write_destination(
+    value: Any,
+    declared_roots: tuple[str, ...] | list[str],
+) -> str:
+    """Return a contract-relative, declared compatibility destination."""
+    normalized = _normalize_relative_path(
+        value,
+        "legacy compatibility write",
+    )
+    if not any(
+        _is_relative_path_at_or_under_root(normalized, root)
+        for root in declared_roots
+    ):
+        raise ValueError(
+            "legacy compatibility writes must use declared legacy "
+            "compatibility roots: "
+            + normalized
+        )
+    return normalized
+
+
+def _is_relative_path_at_or_under_root(path: str, root: str) -> bool:
+    normalized_path = path.replace("\\", "/").strip("/").casefold()
+    normalized_root = root.replace("\\", "/").strip("/").casefold()
+    return normalized_path == normalized_root or normalized_path.startswith(
+        normalized_root + "/"
+    )
 
 
 @dataclass(slots=True, frozen=True)
@@ -92,7 +142,12 @@ class LiveDocumentEntry:
 
     @classmethod
     def model_validate(cls, payload: dict[str, Any]) -> "LiveDocumentEntry":
-        lifecycle = str(payload.get("lifecycle") or "").strip().lower()
+        if not isinstance(payload, dict):
+            raise ValueError("live document entry must be an object")
+        lifecycle = _require_string(
+            payload.get("lifecycle"),
+            "document lifecycle",
+        ).strip().lower()
         if lifecycle not in ALLOWED_DOCUMENT_LIFECYCLES:
             raise ValueError(f"unsupported document lifecycle: {lifecycle}")
         path = _normalize_relative_path(payload.get("path"), "document path")
@@ -121,6 +176,8 @@ class StableEntryLinks:
 
     @classmethod
     def model_validate(cls, payload: dict[str, Any]) -> "StableEntryLinks":
+        if not isinstance(payload, dict):
+            raise ValueError("stable entry link declaration must be an object")
         source = _normalize_relative_path(
             payload.get("source"),
             "stable entry source",
@@ -151,11 +208,20 @@ class ProofRetentionPolicy:
 
     @classmethod
     def model_validate(cls, payload: dict[str, Any]) -> "ProofRetentionPolicy":
-        pull_request_days = int(payload.get("pull_request_days") or 0)
-        main_and_scheduled_days = int(
-            payload.get("main_and_scheduled_days") or 0
+        if not isinstance(payload, dict):
+            raise ValueError("proof_retention must be an object")
+        pull_request_days = _require_integer(
+            payload.get("pull_request_days"),
+            "proof retention pull_request_days",
         )
-        formal_release = str(payload.get("formal_release") or "").strip().lower()
+        main_and_scheduled_days = _require_integer(
+            payload.get("main_and_scheduled_days"),
+            "proof retention main_and_scheduled_days",
+        )
+        formal_release = _require_string(
+            payload.get("formal_release"),
+            "proof retention formal_release",
+        ).strip().lower()
         if pull_request_days != PULL_REQUEST_PROOF_RETENTION_DAYS:
             raise ValueError(
                 "proof retention for pull requests must be exactly "
@@ -185,6 +251,75 @@ class ProofRetentionPolicy:
 
 
 @dataclass(slots=True, frozen=True)
+class SessionReceiptContract:
+    root: str
+    owner: str
+    retention: str
+    copy_to_artifact_sink: bool
+
+    @classmethod
+    def model_validate(cls, payload: dict[str, Any]) -> "SessionReceiptContract":
+        if not isinstance(payload, dict):
+            raise ValueError("artifact sink session_receipts must be an object")
+        owner = _normalize_slug(payload.get("owner"), "session receipt owner")
+        if owner != SESSION_RECEIPT_OWNER:
+            raise ValueError(
+                f"session receipt owner must be {SESSION_RECEIPT_OWNER}"
+            )
+        retention = _normalize_slug(
+            payload.get("retention"),
+            "session receipt retention",
+        )
+        if retention != SESSION_RECEIPT_RETENTION:
+            raise ValueError(
+                "session receipt retention must be " + SESSION_RECEIPT_RETENTION
+            )
+        if payload.get("copy_to_artifact_sink") is not True:
+            raise ValueError(
+                "artifact sink session_receipts.copy_to_artifact_sink must be true"
+            )
+        return cls(
+            root=_normalize_relative_path(
+                payload.get("root"),
+                "session receipt root",
+            ),
+            owner=owner,
+            retention=retention,
+            copy_to_artifact_sink=True,
+        )
+
+    def model_dump(self) -> dict[str, Any]:
+        return {
+            "root": self.root,
+            "owner": self.owner,
+            "retention": self.retention,
+            "copy_to_artifact_sink": self.copy_to_artifact_sink,
+        }
+
+    def resolve_root(self, artifact_root: str | Path) -> Path:
+        base_root = Path(artifact_root).resolve()
+        receipt_root = (base_root / Path(self.root)).resolve()
+        if not receipt_root.is_relative_to(base_root):
+            raise ValueError(
+                "session receipt root resolves outside the artifact root"
+            )
+        return receipt_root
+
+    def resolve_run_root(
+        self,
+        artifact_root: str | Path,
+        run_id: str,
+    ) -> Path:
+        receipt_root = self.resolve_root(artifact_root)
+        run_root = (receipt_root / _normalize_run_id(run_id)).resolve()
+        if not run_root.is_relative_to(receipt_root):
+            raise ValueError(
+                "session receipt run root resolves outside the receipt root"
+            )
+        return run_root
+
+
+@dataclass(slots=True, frozen=True)
 class ArtifactSinkContract:
     schema_version: int
     root: str
@@ -194,13 +329,20 @@ class ArtifactSinkContract:
     primary_document_paths: tuple[tuple[str, str], ...]
     manifest_path: str
     legacy_compatibility_path: str
+    session_receipts: SessionReceiptContract
+    legacy_projection_root: str
     legacy_documentation_roots: tuple[str, ...]
     legacy_removal_release: str
     legacy_write_mode: str
 
     @classmethod
     def model_validate(cls, payload: dict[str, Any]) -> "ArtifactSinkContract":
-        schema_version = int(payload.get("schema_version") or 0)
+        if not isinstance(payload, dict):
+            raise ValueError("artifact_sink must be an object")
+        schema_version = _require_integer(
+            payload.get("schema_version"),
+            "artifact sink schema_version",
+        )
         if schema_version <= 0:
             raise ValueError("artifact sink schema_version must be positive")
         required_artifacts = _normalize_unique_strings(
@@ -233,7 +375,7 @@ class ArtifactSinkContract:
         if isinstance(raw_artifact_paths, dict):
             artifact_paths = tuple(
                 (
-                    str(kind).strip(),
+                    _require_string(kind, "artifact kind").strip(),
                     _normalize_relative_path(path, f"artifact path for {kind}"),
                 )
                 for kind, path in raw_artifact_paths.items()
@@ -266,7 +408,7 @@ class ArtifactSinkContract:
             )
         primary_document_paths = tuple(
             (
-                str(kind).strip(),
+                _require_string(kind, "primary document kind").strip(),
                 _normalize_relative_path(
                     path,
                     f"primary document path for {kind}",
@@ -297,6 +439,16 @@ class ArtifactSinkContract:
         legacy_compatibility_path = _normalize_relative_path(
             payload.get("legacy_compatibility_path"),
             "artifact sink legacy_compatibility_path",
+        )
+        raw_session_receipts = payload.get("session_receipts")
+        if not isinstance(raw_session_receipts, dict):
+            raise ValueError("artifact sink session_receipts must be an object")
+        session_receipts = SessionReceiptContract.model_validate(
+            raw_session_receipts
+        )
+        legacy_projection_root = _normalize_relative_path(
+            payload.get("legacy_projection_root"),
+            "artifact sink legacy_projection_root",
         )
         all_contract_paths = [path for _, path in artifact_paths]
         all_contract_paths.extend(path for _, path in primary_document_paths)
@@ -329,13 +481,23 @@ class ArtifactSinkContract:
             raise ValueError(
                 "artifact sink legacy_documentation_roots must be unique"
             )
-        legacy_removal_release = str(
-            payload.get("legacy_removal_release") or ""
+        root = _normalize_relative_path(payload.get("root"), "artifact sink root")
+        if any(
+            _is_relative_path_at_or_under_root(root, legacy_root)
+            for legacy_root in legacy_documentation_roots
+        ):
+            raise ValueError(
+                "historical documentation roots cannot be primary artifact destinations"
+            )
+        legacy_removal_release = _require_string(
+            payload.get("legacy_removal_release"),
+            "artifact sink legacy_removal_release",
         ).strip()
         if not legacy_removal_release:
             raise ValueError("artifact sink legacy_removal_release must be non-empty")
-        legacy_write_mode = str(
-            payload.get("legacy_write_mode") or ""
+        legacy_write_mode = _require_string(
+            payload.get("legacy_write_mode"),
+            "artifact sink legacy_write_mode",
         ).strip().lower()
         if legacy_write_mode not in ALLOWED_LEGACY_WRITE_MODES:
             raise ValueError(
@@ -343,13 +505,15 @@ class ArtifactSinkContract:
             )
         return cls(
             schema_version=schema_version,
-            root=_normalize_relative_path(payload.get("root"), "artifact sink root"),
+            root=root,
             required_artifacts=required_artifacts,
             required_metadata=required_metadata,
             artifact_paths=artifact_paths,
             primary_document_paths=primary_document_paths,
             manifest_path=manifest_path,
             legacy_compatibility_path=legacy_compatibility_path,
+            session_receipts=session_receipts,
+            legacy_projection_root=legacy_projection_root,
             legacy_documentation_roots=legacy_documentation_roots,
             legacy_removal_release=legacy_removal_release,
             legacy_write_mode=legacy_write_mode,
@@ -427,6 +591,8 @@ class ArtifactSinkContract:
             "primary_document_paths": self.primary_document_path_map,
             "manifest_path": self.manifest_path,
             "legacy_compatibility_path": self.legacy_compatibility_path,
+            "session_receipts": self.session_receipts.model_dump(),
+            "legacy_projection_root": self.legacy_projection_root,
             "legacy_documentation_roots": list(self.legacy_documentation_roots),
             "legacy_removal_release": self.legacy_removal_release,
             "legacy_write_mode": self.legacy_write_mode,
@@ -449,7 +615,12 @@ class RunArtifactManifest:
         payload: dict[str, Any],
         artifact_sink: ArtifactSinkContract,
     ) -> "RunArtifactManifest":
-        schema_version = int(payload.get("schema_version") or 0)
+        if not isinstance(payload, dict):
+            raise ValueError("run artifact manifest must be an object")
+        schema_version = _require_integer(
+            payload.get("schema_version"),
+            "run artifact schema_version",
+        )
         if schema_version != artifact_sink.schema_version:
             raise ValueError(
                 "run artifact schema_version does not match the artifact sink contract"
@@ -459,9 +630,14 @@ class RunArtifactManifest:
         if not isinstance(raw_artifacts, dict):
             raise ValueError("run artifact manifest artifacts must be an object")
         artifacts = {
-            str(key): _normalize_relative_path(value, f"artifact path for {key}")
+            _require_string(key, "run artifact kind").strip(): _normalize_relative_path(
+                value,
+                f"artifact path for {key}",
+            )
             for key, value in raw_artifacts.items()
         }
+        if any(not kind for kind in artifacts):
+            raise ValueError("run artifact manifest kinds must be non-empty strings")
         missing_artifacts = set(artifact_sink.required_artifacts) - set(artifacts)
         if missing_artifacts:
             raise ValueError(
@@ -474,7 +650,10 @@ class RunArtifactManifest:
             raise ValueError(
                 "run artifact manifest paths must match the artifact sink contract"
             )
-        commit_sha = str(payload.get("commit_sha") or "").strip()
+        commit_sha = _require_string(
+            payload.get("commit_sha"),
+            "run artifact manifest commit_sha",
+        ).strip()
         if not commit_sha:
             raise ValueError("run artifact manifest requires commit_sha")
         raw_environment = payload.get("execution_environment")
@@ -482,11 +661,18 @@ class RunArtifactManifest:
             raise ValueError(
                 "run artifact manifest requires execution_environment metadata"
             )
-        execution_environment = {
-            str(key).strip(): str(value).strip()
-            for key, value in raw_environment.items()
-            if str(key).strip() and str(value).strip()
-        }
+        execution_environment = {}
+        for key, value in raw_environment.items():
+            normalized_key = _require_string(
+                key,
+                "run artifact execution_environment key",
+            ).strip()
+            normalized_value = _require_string(
+                value,
+                f"run artifact execution_environment value for {normalized_key}",
+            ).strip()
+            if normalized_key and normalized_value:
+                execution_environment[normalized_key] = normalized_value
         if not execution_environment:
             raise ValueError(
                 "run artifact manifest requires execution_environment metadata"
@@ -512,23 +698,25 @@ class RunArtifactManifest:
         if not isinstance(raw_legacy_compatibility, dict):
             raise ValueError("legacy_compatibility must be an object")
         legacy_compatibility = dict(raw_legacy_compatibility)
-        if (
-            str(legacy_compatibility.get("mode") or "").strip().lower()
-            != artifact_sink.legacy_write_mode
-        ):
+        mode = _require_string(
+            legacy_compatibility.get("mode"),
+            "legacy compatibility mode",
+        ).strip().lower()
+        if mode != artifact_sink.legacy_write_mode:
             raise ValueError(
                 "legacy compatibility mode must match the artifact sink contract"
             )
-        if (
-            str(legacy_compatibility.get("removal_release") or "").strip()
-            != artifact_sink.legacy_removal_release
-        ):
+        removal_release = _require_string(
+            legacy_compatibility.get("removal_release"),
+            "legacy compatibility removal_release",
+        ).strip()
+        if removal_release != artifact_sink.legacy_removal_release:
             raise ValueError(
                 "legacy compatibility removal_release must match the artifact sink contract"
             )
         raw_documentation_roots = legacy_compatibility.get("documentation_roots")
         if not isinstance(raw_documentation_roots, list) or tuple(
-            str(root).replace("\\", "/").strip()
+            _normalize_relative_path(root, "legacy compatibility documentation root")
             for root in raw_documentation_roots
         ) != artifact_sink.legacy_documentation_roots:
             raise ValueError(
@@ -536,20 +724,69 @@ class RunArtifactManifest:
             )
         raw_writes = legacy_compatibility.get("writes")
         if not isinstance(raw_writes, list) or any(
-            not str(path or "").strip() for path in raw_writes
+            not isinstance(path, str) or not path.strip() for path in raw_writes
         ):
             raise ValueError("legacy compatibility writes must be a list of paths")
         if artifact_sink.legacy_write_mode == "disabled" and raw_writes:
             raise ValueError(
                 "disabled legacy compatibility cannot declare writes"
             )
+        declared_compatibility_roots = (
+            *artifact_sink.legacy_documentation_roots,
+            artifact_sink.legacy_projection_root,
+        )
+        writes = [
+            normalize_legacy_write_destination(path, declared_compatibility_roots)
+            for path in raw_writes
+        ]
+        if len({path.casefold() for path in writes}) != len(writes):
+            raise ValueError("legacy compatibility writes must be unique")
+        raw_write_records = legacy_compatibility.get("write_records")
+        if not isinstance(raw_write_records, list) or len(raw_write_records) != len(
+            writes
+        ):
+            raise ValueError(
+                "legacy compatibility write_records must describe every write"
+            )
+        write_records: list[dict[str, str]] = []
+        for destination, raw_record in zip(writes, raw_write_records, strict=True):
+            if not isinstance(raw_record, dict):
+                raise ValueError(
+                    "legacy compatibility write_records must contain objects"
+                )
+            record = {
+                "destination": _normalize_relative_path(
+                    raw_record.get("destination"),
+                    "legacy compatibility write record destination",
+                ),
+                "mode": _require_string(
+                    raw_record.get("mode"),
+                    "legacy compatibility write record mode",
+                ).strip().lower(),
+                "removal_release": _require_string(
+                    raw_record.get("removal_release"),
+                    "legacy compatibility write record removal_release",
+                ).strip(),
+            }
+            expected_record = {
+                "destination": destination,
+                "mode": artifact_sink.legacy_write_mode,
+                "removal_release": artifact_sink.legacy_removal_release,
+            }
+            if record != expected_record:
+                raise ValueError(
+                    "legacy compatibility write_records must match destinations, "
+                    "mode, and removal release"
+                )
+            write_records.append(record)
         if legacy_compatibility.get("observable") is not True:
             raise ValueError("legacy compatibility must be observable")
         legacy_compatibility = {
             "mode": artifact_sink.legacy_write_mode,
             "removal_release": artifact_sink.legacy_removal_release,
             "documentation_roots": list(artifact_sink.legacy_documentation_roots),
-            "writes": [str(path).strip() for path in raw_writes],
+            "writes": writes,
+            "write_records": write_records,
             "observable": True,
         }
         return cls(
@@ -608,10 +845,18 @@ class LiveGovernanceContract:
 
     @classmethod
     def model_validate(cls, payload: dict[str, Any]) -> "LiveGovernanceContract":
-        schema_version = int(payload.get("schema_version") or 0)
+        if not isinstance(payload, dict):
+            raise ValueError("live governance contract must be an object")
+        schema_version = _require_integer(
+            payload.get("schema_version"),
+            "live governance schema_version",
+        )
         if schema_version <= 0:
             raise ValueError("live governance schema_version must be positive")
-        max_live_documents = int(payload.get("max_live_documents") or 0)
+        max_live_documents = _require_integer(
+            payload.get("max_live_documents"),
+            "max_live_documents",
+        )
         if max_live_documents <= 0 or max_live_documents > MAX_LIVE_MARKDOWN_DOCUMENTS:
             raise ValueError(
                 f"max_live_documents must be between 1 and {MAX_LIVE_MARKDOWN_DOCUMENTS}"
@@ -623,19 +868,27 @@ class LiveGovernanceContract:
             _normalize_relative_path(root, "governed root", allow_dot=True)
             for root in raw_roots
         )
+        if len({root.casefold() for root in governed_roots}) != len(governed_roots):
+            raise ValueError("governed roots must be unique")
         missing_roots = REQUIRED_GOVERNED_ROOTS - set(governed_roots)
         if missing_roots:
             raise ValueError(
                 "missing required governed roots: "
                 + ", ".join(sorted(missing_roots))
             )
+        raw_excluded_paths = payload.get("excluded_paths")
+        if not isinstance(raw_excluded_paths, list):
+            raise ValueError("excluded_paths must be a list")
         excluded_paths = tuple(
             _normalize_relative_path(path, "excluded path")
-            for path in list(payload.get("excluded_paths") or [])
+            for path in raw_excluded_paths
         )
+        raw_excluded_prefixes = payload.get("excluded_prefixes")
+        if not isinstance(raw_excluded_prefixes, list):
+            raise ValueError("excluded_prefixes must be a list")
         excluded_prefixes = tuple(
             _normalize_relative_path(path, "excluded prefix").rstrip("/") + "/"
-            for path in list(payload.get("excluded_prefixes") or [])
+            for path in raw_excluded_prefixes
         )
         unsupported_excluded_paths = set(excluded_paths) - ALLOWED_EXCLUDED_PATHS
         if unsupported_excluded_paths:
@@ -676,13 +929,20 @@ class LiveGovernanceContract:
             )
         document_ids = [document.document_id for document in documents]
         document_paths = [document.path for document in documents]
-        if len(set(document_ids)) != len(document_ids):
+        if len({document_id.casefold() for document_id in document_ids}) != len(
+            document_ids
+        ):
             raise ValueError("live document ids must be unique")
-        if len(set(document_paths)) != len(document_paths):
+        if len({document_path.casefold() for document_path in document_paths}) != len(
+            document_paths
+        ):
             raise ValueError("live document paths must be unique")
         for document in documents:
-            if document.path in excluded_paths or any(
-                document.path.startswith(prefix) for prefix in excluded_prefixes
+            if document.path.casefold() in {
+                path.casefold() for path in excluded_paths
+            } or any(
+                document.path.casefold().startswith(prefix.casefold())
+                for prefix in excluded_prefixes
             ):
                 raise ValueError(
                     f"excluded document cannot be registered as live: {document.path}"
@@ -759,10 +1019,14 @@ def _is_path_under_governed_roots(
     document_path: str,
     governed_roots: tuple[str, ...],
 ) -> bool:
+    folded_path = document_path.casefold()
     for root in governed_roots:
-        if root == "." and "/" not in document_path:
+        folded_root = root.casefold()
+        if folded_root == "." and "/" not in document_path:
             return True
-        if root != "." and document_path.startswith(root.rstrip("/") + "/"):
+        if folded_root != "." and folded_path.startswith(
+            folded_root.rstrip("/") + "/"
+        ):
             return True
     return False
 

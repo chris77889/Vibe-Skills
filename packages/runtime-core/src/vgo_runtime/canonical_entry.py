@@ -35,6 +35,12 @@ from vgo_contracts.canonical_vibe_contract import resolve_canonical_vibe_contrac
 from vgo_contracts.discoverable_entry_surface import load_discoverable_entry_surface
 from vgo_contracts.entry_root_guard import EntryRootGuardError, resolve_entry_repo_root
 from vgo_contracts.host_launch_receipt import HostLaunchReceipt, read_host_launch_receipt, write_host_launch_receipt
+from vgo_runtime.artifact_contract import (  # noqa: E402
+    resolve_runtime_artifact_projection,
+    resolve_runtime_session_receipts_root,
+    resolve_runtime_session_root,
+    sync_session_receipts_to_run_artifact_sink,
+)
 from vgo_runtime.kernel.loop import run_local_kernel
 from vgo_runtime.powershell_bridge import run_powershell_json_command
 from vgo_runtime.runtime_support import resolve_host_id
@@ -350,12 +356,26 @@ def _seed_requested_stage_stop(
     return normalized_requested_stage_stop
 
 
-def _continuation_sessions_root(artifact_root: Path) -> Path:
-    return artifact_root / "outputs" / "runtime" / "vibe-sessions"
+def _continuation_sessions_root(
+    artifact_root: Path,
+    *,
+    repo_root: Path = REPO_ROOT,
+) -> Path:
+    return resolve_runtime_session_receipts_root(
+        repo_root=repo_root,
+        artifact_root=artifact_root,
+    )
 
 
-def _iter_runtime_summaries(artifact_root: Path) -> list[Path]:
-    sessions_root = _continuation_sessions_root(artifact_root)
+def _iter_runtime_summaries(
+    artifact_root: Path,
+    *,
+    repo_root: Path = REPO_ROOT,
+) -> list[Path]:
+    sessions_root = _continuation_sessions_root(
+        artifact_root,
+        repo_root=repo_root,
+    )
     if not sessions_root.exists():
         return []
     return sorted(
@@ -365,14 +385,23 @@ def _iter_runtime_summaries(artifact_root: Path) -> list[Path]:
     )
 
 
-def _runtime_summary_path_for_run_id(artifact_root: Path, run_id: str | None) -> Path | None:
+def _runtime_summary_path_for_run_id(
+    artifact_root: Path,
+    run_id: str | None,
+    *,
+    repo_root: Path = REPO_ROOT,
+) -> Path | None:
     candidate = str(run_id or "").strip()
     if not candidate or candidate in {".", ".."} or "/" in candidate or "\\" in candidate:
         return None
     windows_candidate = PureWindowsPath(candidate)
     if windows_candidate.drive or windows_candidate.anchor or windows_candidate.is_absolute():
         return None
-    return _continuation_sessions_root(artifact_root) / candidate / "runtime-summary.json"
+    return (
+        _continuation_sessions_root(artifact_root, repo_root=repo_root)
+        / candidate
+        / "runtime-summary.json"
+    )
 
 
 def _load_json_dict_if_exists(path: Path | None) -> dict[str, Any] | None:
@@ -929,8 +958,13 @@ def _find_continuation_context(
     run_id: str | None,
     preferred_run_id: str | None = None,
     allow_bounded_preferred: bool = False,
+    repo_root: Path = REPO_ROOT,
 ) -> dict[str, Any] | None:
-    preferred_summary = _runtime_summary_path_for_run_id(artifact_root, preferred_run_id)
+    preferred_summary = _runtime_summary_path_for_run_id(
+        artifact_root,
+        preferred_run_id,
+        repo_root=repo_root,
+    )
     bounded_preferred_locked = allow_bounded_preferred and bool(str(preferred_run_id or "").strip())
     if bounded_preferred_locked and (preferred_summary is None or not preferred_summary.is_file()):
         return None
@@ -949,7 +983,10 @@ def _find_continuation_context(
             if bounded_preferred_locked:
                 return None
 
-    for summary_path in _iter_runtime_summaries(artifact_root):
+    for summary_path in _iter_runtime_summaries(
+        artifact_root,
+        repo_root=repo_root,
+    ):
         if run_id and summary_path.parent.name == run_id:
             continue
         summary = _load_json_dict_if_exists(summary_path)
@@ -1017,6 +1054,7 @@ def _resolve_effective_prompt(
     host_id: str,
     entry_id: str,
     prompt: str,
+    repo_root: Path = REPO_ROOT,
     host_decision: dict[str, Any] | None = None,
     artifact_root: Path | None = None,
     run_id: str | None = None,
@@ -1038,6 +1076,7 @@ def _resolve_effective_prompt(
             run_id=run_id,
             preferred_run_id=continuation_source_run_id,
             allow_bounded_preferred=allow_bounded_preferred_source,
+            repo_root=repo_root,
         )
         if continuation:
             structured_context = _bounded_reentry_context_from_host_decision(host_decision)
@@ -1126,8 +1165,13 @@ def _find_latest_bounded_return_control(
     artifact_root: Path,
     run_id: str | None,
     preferred_run_id: str | None = None,
+    repo_root: Path = REPO_ROOT,
 ) -> dict[str, Any] | None:
-    preferred_summary_path = _runtime_summary_path_for_run_id(artifact_root, preferred_run_id)
+    preferred_summary_path = _runtime_summary_path_for_run_id(
+        artifact_root,
+        preferred_run_id,
+        repo_root=repo_root,
+    )
     if preferred_summary_path and preferred_summary_path.is_file():
         if not _has_verified_host_launch_receipt(preferred_summary_path):
             return None
@@ -1139,7 +1183,10 @@ def _find_latest_bounded_return_control(
                 return preferred_guard
             return _build_malformed_bounded_return_control(preferred_summary, preferred_summary_path)
 
-    for summary_path in _iter_runtime_summaries(artifact_root):
+    for summary_path in _iter_runtime_summaries(
+        artifact_root,
+        repo_root=repo_root,
+    ):
         if run_id and summary_path.parent.name == run_id:
             continue
         if not _has_verified_host_launch_receipt(summary_path):
@@ -1256,6 +1303,7 @@ def _structured_host_decision_reentry_action(
 def _validate_bounded_reentry(
     *,
     artifact_root: Path | None,
+    repo_root: Path = REPO_ROOT,
     entry_id: str,
     prompt: str,
     run_id: str | None,
@@ -1278,6 +1326,7 @@ def _validate_bounded_reentry(
         artifact_root=artifact_root,
         run_id=run_id,
         preferred_run_id=continue_from_run_id,
+        repo_root=repo_root,
     )
     if not prior_guard:
         if explicit_reentry_credentials_supplied:
@@ -1395,7 +1444,11 @@ def _resolve_canonical_roots(
 
 def _resolve_session_root(*, repo_root: Path, run_id: str, artifact_root: str | Path | None) -> Path:
     """Build the canonical session output directory for a run."""
-    return (_resolve_artifact_root(repo_root, artifact_root) / "outputs" / "runtime" / "vibe-sessions" / run_id).resolve()
+    return resolve_runtime_session_root(
+        repo_root=repo_root,
+        artifact_root=_resolve_artifact_root(repo_root, artifact_root),
+        run_id=run_id,
+    )
 
 
 def invoke_vibe_runtime_entrypoint(
@@ -1552,12 +1605,21 @@ def _launch_local_agent_kernel(
     requested_stage_stop: str | None,
     requested_grade_floor: str | None,
     run_id: str | None,
+    artifact_root: Path,
     local_agent_root: str | Path,
     summary_source: str,
     host_decision: dict[str, Any] | None,
 ) -> CanonicalLaunchResult:
     resolved_run_id = str(run_id or "").strip() or f"local-{_new_run_id()}"
-    session_root = (Path(local_agent_root).expanduser().resolve() / "vibe" / "runs" / resolved_run_id).resolve()
+    resolved_local_agent_root = Path(local_agent_root).expanduser().resolve()
+    artifact_projection = resolve_runtime_artifact_projection(
+        agent_root=resolved_local_agent_root,
+        workspace_root=workspace_root,
+        session_artifact_root=artifact_root,
+        run_id=resolved_run_id,
+        repo_root=repo_root,
+    )
+    session_root = artifact_projection.session_root
     normalized_host_decision = _normalize_host_decision(host_decision)
     raw_agent_skill_organization = (
         normalized_host_decision.get("agent_skill_organization") if normalized_host_decision else None
@@ -1588,17 +1650,22 @@ def _launch_local_agent_kernel(
 
     try:
         kernel_result = run_local_kernel(
-            agent_root=Path(local_agent_root),
+            agent_root=resolved_local_agent_root,
             prompt=prompt,
             run_id=resolved_run_id,
             host_id=host_id,
             workspace_root=workspace_root,
+            repo_root=repo_root,
             agent_skill_organization=agent_skill_organization,
             execute=should_execute,
         )
     except Exception:
         failed_receipt = HostLaunchReceipt(**{**receipt.model_dump(), "launch_status": "failed"})
         write_host_launch_receipt(receipt_path, failed_receipt)
+        sync_session_receipts_to_run_artifact_sink(
+            artifact_projection,
+            session_root=session_root,
+        )
         raise
 
     artifacts = dict(kernel_result.get("artifacts") or {})
@@ -1730,6 +1797,10 @@ def _launch_local_agent_kernel(
     verified_receipt = HostLaunchReceipt(**{**receipt.model_dump(), "launch_status": "verified"})
     receipt_path = write_host_launch_receipt(receipt_path, verified_receipt)
     artifacts["host_launch_receipt"] = str(receipt_path)
+    sync_session_receipts_to_run_artifact_sink(
+        artifact_projection,
+        session_root=session_root,
+    )
     return CanonicalLaunchResult(
         run_id=resolved_run_id,
         session_root=session_root,
@@ -2015,6 +2086,7 @@ def launch_canonical_vibe(
             requested_stage_stop=requested_stage_stop_seed,
             requested_grade_floor=requested_grade_floor,
             run_id=run_id,
+            artifact_root=resolved_artifact_root,
             local_agent_root=local_agent_root,
             summary_source="explicit local agent root delegation",
             host_decision=host_decision,
@@ -2041,6 +2113,7 @@ def launch_canonical_vibe(
             requested_stage_stop=requested_stage_stop_seed,
             requested_grade_floor=requested_grade_floor,
             run_id=run_id,
+            artifact_root=resolved_artifact_root,
             local_agent_root=auto_local_agent_root,
             summary_source="auto local agent root detection",
             host_decision=host_decision,
@@ -2065,6 +2138,7 @@ def launch_canonical_vibe(
     normalized_host_decision = _normalize_host_decision(host_decision)
     validated_reentry = _validate_bounded_reentry(
         artifact_root=resolved_artifact_root,
+        repo_root=repo_root_path,
         entry_id=runtime_entry_id,
         prompt=prompt,
         run_id=run_id,
@@ -2095,6 +2169,7 @@ def launch_canonical_vibe(
         host_id=resolved_host_id,
         entry_id=prompt_entry_id,
         prompt=prompt,
+        repo_root=repo_root_path,
         host_decision=effective_host_decision,
         artifact_root=resolved_artifact_root,
         run_id=run_id,
@@ -2478,11 +2553,44 @@ def _finalize_canonical_launch_result(
     fallback_run_id: str,
     fallback_summary_path: Path,
 ) -> CanonicalLaunchResult:
-    session_root = Path(str(payload["session_root"])).resolve()
-    resolved_run_id = str(payload.get("run_id") or fallback_run_id or session_root.name)
-    summary_path = Path(str(payload.get("summary_path") or fallback_summary_path)).resolve()
+    if not isinstance(payload, dict):
+        raise RuntimeError("canonical runtime returned a malformed payload")
+    expected_summary_path = Path(fallback_summary_path).resolve()
+    expected_session_root = expected_summary_path.parent
+    if expected_summary_path.name != "runtime-summary.json":
+        raise RuntimeError(
+            "canonical runtime summary path must be runtime-summary.json"
+        )
+    raw_run_id = payload.get("run_id")
+    if not isinstance(raw_run_id, str) or raw_run_id.strip() != fallback_run_id:
+        raise RuntimeError(
+            "canonical runtime returned a run_id that does not match the live contract"
+        )
+    raw_session_root = payload.get("session_root")
+    if not isinstance(raw_session_root, str) or not raw_session_root.strip():
+        raise RuntimeError("canonical runtime must return session_root")
+    session_root = Path(raw_session_root).expanduser().resolve()
+    if session_root != expected_session_root:
+        raise RuntimeError(
+            "canonical runtime returned session_root outside the live contract"
+        )
+    raw_summary_path = payload.get("summary_path")
+    if not isinstance(raw_summary_path, str) or not raw_summary_path.strip():
+        raise RuntimeError("canonical runtime must return summary_path")
+    summary_path = Path(raw_summary_path).expanduser().resolve()
+    if summary_path != expected_summary_path:
+        raise RuntimeError(
+            "canonical runtime returned summary_path outside the live contract"
+        )
+    resolved_run_id = fallback_run_id
 
-    summary = dict(payload.get("summary") or {})
+    raw_summary = payload.get("summary")
+    if raw_summary is None:
+        summary = {}
+    elif isinstance(raw_summary, dict):
+        summary = dict(raw_summary)
+    else:
+        raise RuntimeError("canonical runtime returned a malformed summary")
     if summary_path.exists():
         summary = _load_json_dict(summary_path, label="runtime-summary")
 

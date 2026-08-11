@@ -17,7 +17,7 @@ if ([string]::IsNullOrWhiteSpace($RunId)) {
 }
 
 $artifactContract = Get-VibeArtifactContractDescriptor -RepoRoot $runtime.repo_root -RunId $RunId -WorkspaceRoot $WorkspaceRoot -ArtifactRoot $ArtifactRoot
-$sessionRoot = Ensure-VibeSessionRoot -RepoRoot $runtime.repo_root -RunId $RunId -Runtime $runtime -ArtifactRoot $ArtifactRoot
+$sessionRoot = Ensure-VibeSessionRoot -RepoRoot $runtime.repo_root -RunId $RunId -Runtime $runtime -WorkspaceRoot $WorkspaceRoot -ArtifactRoot $ArtifactRoot
 $separator = [string][System.IO.Path]::DirectorySeparatorChar
 $legacyRequirementRoot = Join-Path ([string]$artifactContract.workspace_root) ([string]$artifactContract.legacy_documentation_paths.requirement).Replace('/', $separator)
 $legacyPlanRoot = Join-Path ([string]$artifactContract.workspace_root) ([string]$artifactContract.legacy_documentation_paths.plan).Replace('/', $separator)

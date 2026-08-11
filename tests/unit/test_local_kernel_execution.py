@@ -533,7 +533,16 @@ def test_inspect_local_run_reads_the_observable_legacy_projection(
         legacy_root / "requirement.json"
     )
     assert inspected["artifact_manifest"]["legacy_compatibility"]["writes"] == [
-        str(legacy_root)
+        "vibe/runs/legacy-projection"
+    ]
+    assert inspected["artifact_manifest"]["legacy_compatibility"][
+        "write_records"
+    ] == [
+        {
+            "destination": "vibe/runs/legacy-projection",
+            "mode": "dual_write",
+            "removal_release": "4.1.0",
+        }
     ]
     assert inspected["artifact_resolution"] == {
         "mode": "legacy_projection",

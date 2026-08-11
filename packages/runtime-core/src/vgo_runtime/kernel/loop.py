@@ -909,17 +909,19 @@ def run_local_kernel(
     run_id: str | None = None,
     host_id: str | None = None,
     workspace_root: Path | None = None,
+    repo_root: Path | None = None,
     agent_skill_organization: dict[str, object] | None = None,
     execute: bool = True,
 ) -> dict[str, object]:
     resolved_agent_root = agent_root.resolve()
     resolved_workspace_root = workspace_root.resolve() if workspace_root is not None else None
+    resolved_repo_root = repo_root.resolve() if repo_root is not None else _repo_root()
     resolved_run_id = str(run_id or "run-default").strip() or "run-default"
     artifact_projection = resolve_runtime_artifact_projection(
         agent_root=resolved_agent_root,
         workspace_root=resolved_workspace_root,
         run_id=resolved_run_id,
-        repo_root=_repo_root(),
+        repo_root=resolved_repo_root,
     )
     seed_canonical_run_from_legacy_if_needed(artifact_projection)
     run_root = artifact_projection.run_root
@@ -1191,10 +1193,15 @@ def run_local_kernel(
         plan=work_plan_payload,
         status=run_state.model_dump(),
         proof=work_dossier_payload,
-        repo_root=_repo_root(),
+        repo_root=resolved_repo_root,
         host_id=host_id,
         legacy_writes=(
-            [str(artifact_projection.legacy_run_root)]
+            [
+                (
+                    Path(artifact_projection.artifact_sink.legacy_projection_root)
+                    / artifact_projection.run_id
+                ).as_posix()
+            ]
             if artifact_projection.legacy_projection_enabled
             else []
         ),
@@ -1307,12 +1314,15 @@ def inspect_local_run(
         # An older caller may have omitted workspace_root even though the run
         # was written to a sibling workspace. Discover only the bounded run
         # sink shape; no historical documentation path is consulted.
+        sink_parts = Path(projection.artifact_sink.root).parts
         sibling_candidates = sorted(
             {
                 candidate
-                for candidate in resolved_agent_root.parent.glob(
-                    f"*/.vibeskills/runs/{resolved_run_id}"
-                )
+                for sibling_workspace in resolved_agent_root.parent.iterdir()
+                if sibling_workspace.is_dir()
+                for candidate in [
+                    sibling_workspace.joinpath(*sink_parts, resolved_run_id)
+                ]
                 if candidate.is_dir()
             },
             key=lambda candidate: str(candidate),

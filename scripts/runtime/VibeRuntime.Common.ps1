@@ -2420,6 +2420,10 @@ function Test-VibeSafeContractRelativePath {
     ) {
         return $false
     }
+    $segments = @($normalized.TrimEnd('/') -split '/' | Where-Object { $_ -and $_ -ne '.' })
+    if ($segments.Count -eq 0) {
+        return [bool]$AllowDot
+    }
     return $true
 }
 
@@ -2433,10 +2437,99 @@ function ConvertTo-VibeContractRelativePath {
         throw ("contract path must be safe and relative: {0}" -f $Path)
     }
     $normalized = $Path.Replace('\', '/').Trim()
-    if ($normalized -eq '.') {
-        return '.'
+    $segments = @($normalized.TrimEnd('/') -split '/' | Where-Object { $_ -and $_ -ne '.' })
+    if ($segments.Count -eq 0) {
+        if ($AllowDot) {
+            return '.'
+        }
+        throw ("contract path must name a relative path below '.': {0}" -f $Path)
     }
-    return (@($normalized.Split('/') | Where-Object { $_ -and $_ -ne '.' }) -join '/')
+    return ($segments -join '/')
+}
+
+function ConvertTo-VibeContractInteger {
+    param(
+        [AllowNull()] [object]$Value,
+        [Parameter(Mandatory)] [string]$FieldName
+    )
+
+    if ($null -eq $Value -or $Value -is [bool]) {
+        throw ("{0} must be an integer." -f $FieldName)
+    }
+    $typeName = $Value.GetType().Name
+    if ($typeName -notin @('Byte', 'SByte', 'Int16', 'UInt16', 'Int32', 'UInt32', 'Int64', 'UInt64')) {
+        throw ("{0} must be an integer." -f $FieldName)
+    }
+    try {
+        return [int]$Value
+    } catch {
+        throw ("{0} must be an integer." -f $FieldName)
+    }
+}
+
+function ConvertTo-VibeContractString {
+    param(
+        [AllowNull()] [object]$Value,
+        [Parameter(Mandatory)] [string]$FieldName
+    )
+
+    if ($Value -isnot [string]) {
+        throw ("{0} must be a string." -f $FieldName)
+    }
+    return [string]$Value
+}
+
+function Test-VibePathAtOrUnderRoot {
+    param(
+        [Parameter(Mandatory)] [string]$Path,
+        [Parameter(Mandatory)] [string]$Root
+    )
+
+    $normalizedPath = $Path.Replace('\', '/').Trim('/').ToLowerInvariant()
+    $normalizedRoot = $Root.Replace('\', '/').Trim('/').ToLowerInvariant()
+    if ($normalizedRoot -eq '.') {
+        return -not [string]::IsNullOrWhiteSpace($normalizedPath)
+    }
+    return (
+        $normalizedPath -eq $normalizedRoot -or
+        $normalizedPath.StartsWith($normalizedRoot + '/', [System.StringComparison]::Ordinal)
+    )
+}
+
+function ConvertTo-VibeLegacyWriteDestination {
+    param(
+        [AllowNull()] [object]$Value,
+        [Parameter(Mandatory)] [string]$WorkspaceRoot,
+        [Parameter(Mandatory)] [string[]]$DeclaredRoots
+    )
+
+    $raw = (ConvertTo-VibeContractString -Value $Value -FieldName 'legacy compatibility write').Trim()
+    if ([string]::IsNullOrWhiteSpace($raw)) {
+        throw 'legacy compatibility writes must not contain empty paths.'
+    }
+    $candidate = $raw
+    if ([System.IO.Path]::IsPathRooted($raw) -or $raw -match '^[A-Za-z]:') {
+        $baseFull = [System.IO.Path]::GetFullPath($WorkspaceRoot)
+        $targetFull = [System.IO.Path]::GetFullPath($raw)
+        $basePrefix = $baseFull.TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
+        if (
+            $targetFull -ne $baseFull -and
+            -not $targetFull.StartsWith($basePrefix, [System.StringComparison]::OrdinalIgnoreCase)
+        ) {
+            throw ("legacy compatibility writes must remain within the workspace and use declared legacy compatibility roots: {0}" -f $Value)
+        }
+        $candidate = Get-VibeRelativePathCompat -BasePath $baseFull -TargetPath $targetFull
+    }
+    $normalized = ConvertTo-VibeContractRelativePath -Path $candidate
+    $matchesDeclaredRoot = @(
+        $DeclaredRoots | Where-Object {
+            Test-VibePathAtOrUnderRoot -Path $normalized -Root ([string]$_)
+        }
+    ).Count -gt 0
+    if (-not $matchesDeclaredRoot) {
+        throw ("legacy compatibility writes must use declared legacy compatibility roots: {0}" -f $Value)
+    }
+    return $normalized
 }
 
 function Get-VibeLiveGovernanceContract {
@@ -2448,19 +2541,279 @@ function Get-VibeLiveGovernanceContract {
     if (-not (Test-Path -LiteralPath $contractPath -PathType Leaf)) {
         throw ("live governance artifact contract is required: {0}" -f $contractPath)
     }
-    $contract = Get-Content -LiteralPath $contractPath -Raw -Encoding UTF8 | ConvertFrom-Json
-    if ($null -eq $contract -or $null -eq $contract.artifact_sink) {
-        throw 'live governance artifact contract must define artifact_sink.'
-    }
-    $sink = $contract.artifact_sink
-    if ([int]$sink.schema_version -le 0) {
+    try {
+        $contract = Get-Content -LiteralPath $contractPath -Raw -Encoding UTF8 | ConvertFrom-Json -ErrorAction Stop
+        if (
+            -not (Test-VibeStructuredObject -InputObject $contract) -or
+            -not ($contract.PSObject.Properties.Name -ccontains 'artifact_sink') -or
+            -not (Test-VibeStructuredObject -InputObject $contract.artifact_sink)
+        ) {
+            throw 'live governance artifact contract must define artifact_sink.'
+        }
+        if (-not ($contract.PSObject.Properties.Name -ccontains 'schema_version')) {
+            throw 'live governance contract schema_version is required.'
+        }
+        $schemaVersion = ConvertTo-VibeContractInteger -Value $contract.schema_version -FieldName 'live governance schema_version'
+        if ($schemaVersion -le 0) {
+            throw 'live governance contract schema_version must be positive.'
+        }
+        if (-not ($contract.PSObject.Properties.Name -ccontains 'max_live_documents')) {
+            throw 'live governance contract max_live_documents is required.'
+        }
+        $maxLiveDocuments = ConvertTo-VibeContractInteger -Value $contract.max_live_documents -FieldName 'live governance max_live_documents'
+        if ($maxLiveDocuments -le 0 -or $maxLiveDocuments -gt 30) {
+            throw 'live governance contract max_live_documents must be between 1 and 30.'
+        }
+        if (
+            -not ($contract.PSObject.Properties.Name -ccontains 'governed_roots') -or
+            $null -eq $contract.governed_roots -or
+            -not ($contract.governed_roots -is [System.Array])
+        ) {
+            throw 'live governance contract governed_roots must be a non-empty list.'
+        }
+        $governedRoots = @(
+            $contract.governed_roots |
+                ForEach-Object {
+                    ConvertTo-VibeContractRelativePath -Path (ConvertTo-VibeContractString -Value $_ -FieldName 'governed root') -AllowDot
+                }
+        )
+        if ($governedRoots.Count -eq 0) {
+            throw 'live governance contract governed_roots must be a non-empty list.'
+        }
+        $governedRootSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+        if (@($governedRoots | Where-Object { -not $governedRootSet.Add($_) }).Count -gt 0) {
+            throw 'live governance contract governed_roots must be unique.'
+        }
+        foreach ($requiredRoot in @('.', 'docs', 'references')) {
+            if ($governedRoots -cnotcontains $requiredRoot) {
+                throw ("live governance contract is missing required governed root: {0}" -f $requiredRoot)
+            }
+        }
+        $contract.governed_roots = $governedRoots
+
+        if (
+            ($contract.PSObject.Properties.Name -ccontains 'excluded_paths') -and
+            -not ($contract.excluded_paths -is [System.Array])
+        ) {
+            throw 'live governance contract excluded_paths must be a list.'
+        }
+        if (-not ($contract.PSObject.Properties.Name -ccontains 'excluded_paths')) {
+            throw 'live governance contract excluded_paths must be a list.'
+        }
+        $excludedPaths = @(
+            @($contract.excluded_paths) |
+                ForEach-Object {
+                    ConvertTo-VibeContractRelativePath -Path (ConvertTo-VibeContractString -Value $_ -FieldName 'excluded path')
+                }
+        )
+        if (@($excludedPaths | Where-Object { $_ -cne 'THIRD_PARTY_LICENSES.md' }).Count -gt 0) {
+            throw 'live governance contract contains unsupported excluded_paths.'
+        }
+        $excludedPathSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+        if (@($excludedPaths | Where-Object { -not $excludedPathSet.Add($_) }).Count -gt 0) {
+            throw 'live governance contract excluded_paths must be unique.'
+        }
+        $contract.excluded_paths = $excludedPaths
+
+        if (
+            ($contract.PSObject.Properties.Name -ccontains 'excluded_prefixes') -and
+            -not ($contract.excluded_prefixes -is [System.Array])
+        ) {
+            throw 'live governance contract excluded_prefixes must be a list.'
+        }
+        if (-not ($contract.PSObject.Properties.Name -ccontains 'excluded_prefixes')) {
+            throw 'live governance contract excluded_prefixes must be a list.'
+        }
+        $excludedPrefixes = @(
+            @($contract.excluded_prefixes) |
+                ForEach-Object {
+                    (ConvertTo-VibeContractRelativePath -Path (ConvertTo-VibeContractString -Value $_ -FieldName 'excluded prefix')).TrimEnd('/') + '/'
+                }
+        )
+        if (@($excludedPrefixes | Where-Object { $_ -cne 'references/provenance/' }).Count -gt 0) {
+            throw 'live governance contract contains unsupported excluded_prefixes.'
+        }
+        $excludedPrefixSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+        if (@($excludedPrefixes | Where-Object { -not $excludedPrefixSet.Add($_) }).Count -gt 0) {
+            throw 'live governance contract excluded_prefixes must be unique.'
+        }
+        $contract.excluded_prefixes = $excludedPrefixes
+
+        if (
+            -not ($contract.PSObject.Properties.Name -ccontains 'documents') -or
+            $null -eq $contract.documents -or
+            -not ($contract.documents -is [System.Array])
+        ) {
+            throw 'live governance contract documents must be a list.'
+        }
+        $documents = @($contract.documents)
+        if ($documents.Count -eq 0) {
+            throw 'live governance contract documents must contain at least one live document.'
+        }
+        if ($documents.Count -gt $maxLiveDocuments) {
+            throw 'live governance contract documents exceed max_live_documents.'
+        }
+        $documentIdSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+        $documentPathSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+        foreach ($document in $documents) {
+            if (
+                $null -eq $document -or
+                -not (Test-VibeStructuredObject -InputObject $document) -or
+                -not ($document.PSObject.Properties.Name -ccontains 'id') -or
+                -not ($document.PSObject.Properties.Name -ccontains 'path') -or
+                -not ($document.PSObject.Properties.Name -ccontains 'owner') -or
+                -not ($document.PSObject.Properties.Name -ccontains 'lifecycle')
+            ) {
+                throw 'live governance contract every document entry must be an object.'
+            }
+            $documentId = (ConvertTo-VibeContractString -Value $document.id -FieldName 'live document id').Trim().ToLowerInvariant()
+            $documentOwner = (ConvertTo-VibeContractString -Value $document.owner -FieldName 'live document owner').Trim().ToLowerInvariant()
+            $documentLifecycle = (ConvertTo-VibeContractString -Value $document.lifecycle -FieldName 'live document lifecycle').Trim().ToLowerInvariant()
+            if ($documentId -notmatch '^[a-z0-9][a-z0-9._-]*$') {
+                throw 'live governance contract document id must be a lowercase identifier.'
+            }
+            if ($documentOwner -notmatch '^[a-z0-9][a-z0-9._-]*$') {
+                throw 'live governance contract document owner must be a lowercase identifier.'
+            }
+            if ($documentLifecycle -notin @('live', 'transitional', 'retained')) {
+                throw 'live governance contract document lifecycle is invalid.'
+            }
+            $documentPath = ConvertTo-VibeContractRelativePath -Path (ConvertTo-VibeContractString -Value $document.path -FieldName 'live document path')
+            if (-not $documentPath.EndsWith('.md', [System.StringComparison]::OrdinalIgnoreCase)) {
+                throw 'live governance contract document path must be Markdown.'
+            }
+            if (-not $documentIdSet.Add($documentId)) {
+                throw 'live governance contract document ids must be unique.'
+            }
+            if (-not $documentPathSet.Add($documentPath)) {
+                throw 'live governance contract document paths must be unique.'
+            }
+            if (
+                @($excludedPaths | Where-Object { $_.Equals($documentPath, [System.StringComparison]::OrdinalIgnoreCase) }).Count -gt 0 -or
+                @($excludedPrefixes | Where-Object { $documentPath.StartsWith($_, [System.StringComparison]::OrdinalIgnoreCase) }).Count -gt 0
+            ) {
+                throw ("live governance contract excluded document cannot be registered: {0}" -f $documentPath)
+            }
+            $underGovernedRoot = $false
+            foreach ($governedRoot in $governedRoots) {
+                if (
+                    ($governedRoot -eq '.' -and $documentPath -notmatch '/') -or
+                    ($governedRoot -ne '.' -and $documentPath.StartsWith($governedRoot.TrimEnd('/') + '/', [System.StringComparison]::OrdinalIgnoreCase))
+                ) {
+                    $underGovernedRoot = $true
+                    break
+                }
+            }
+            if (-not $underGovernedRoot) {
+                throw ("live governance contract document is outside governed roots: {0}" -f $documentPath)
+            }
+            $document.id = $documentId
+            $document.path = $documentPath
+            $document.owner = $documentOwner
+            $document.lifecycle = $documentLifecycle
+        }
+
+        if (
+            -not ($contract.PSObject.Properties.Name -ccontains 'stable_entry_links') -or
+            $null -eq $contract.stable_entry_links -or
+            -not ($contract.stable_entry_links -is [System.Array])
+        ) {
+            throw 'live governance contract stable_entry_links must be a non-empty list.'
+        }
+        $stableEntryLinks = @($contract.stable_entry_links)
+        if ($stableEntryLinks.Count -eq 0) {
+            throw 'live governance contract stable_entry_links must be a non-empty list.'
+        }
+        $stableSourceSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+        foreach ($entry in $stableEntryLinks) {
+            if (-not (Test-VibeStructuredObject -InputObject $entry) -or -not ($entry.PSObject.Properties.Name -ccontains 'source')) {
+                throw 'live governance contract every stable entry link must be an object.'
+            }
+            if (-not ($entry.PSObject.Properties.Name -ccontains 'targets')) {
+                throw 'live governance contract stable entry targets must be a non-empty list.'
+            }
+            $source = ConvertTo-VibeContractRelativePath -Path (ConvertTo-VibeContractString -Value $entry.source -FieldName 'stable entry source')
+            if (-not $stableSourceSet.Add($source)) {
+                throw 'live governance contract stable entry sources must be unique.'
+            }
+            if (-not $documentPathSet.Contains($source)) {
+                throw ("live governance contract stable entry source must be registered: {0}" -f $source)
+            }
+            if (
+                -not ($entry.PSObject.Properties.Name -ccontains 'targets') -or
+                $null -eq $entry.targets -or
+                -not ($entry.targets -is [System.Array])
+            ) {
+                throw 'live governance contract stable entry targets must be a non-empty list.'
+            }
+            $targets = @(
+                $entry.targets |
+                    ForEach-Object {
+                        ConvertTo-VibeContractRelativePath -Path (ConvertTo-VibeContractString -Value $_ -FieldName 'stable entry target')
+                    }
+            )
+            if ($targets.Count -eq 0) {
+                throw 'live governance contract stable entry targets must be a non-empty list.'
+            }
+            $targetSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+            foreach ($target in $targets) {
+                if (-not $targetSet.Add($target)) {
+                    throw 'live governance contract stable entry targets must be unique.'
+                }
+                if (-not $documentPathSet.Contains($target)) {
+                    throw ("live governance contract stable entry target must be registered: {0}" -f $target)
+                }
+            }
+            $entry.source = $source
+            $entry.targets = $targets
+        }
+
+        if (
+            -not ($contract.PSObject.Properties.Name -ccontains 'proof_retention') -or
+            -not (Test-VibeStructuredObject -InputObject $contract.proof_retention)
+        ) {
+            throw 'live governance contract proof_retention must be an object.'
+        }
+        if (
+            -not ($contract.proof_retention.PSObject.Properties.Name -ccontains 'pull_request_days') -or
+            -not ($contract.proof_retention.PSObject.Properties.Name -ccontains 'main_and_scheduled_days') -or
+            -not ($contract.proof_retention.PSObject.Properties.Name -ccontains 'formal_release')
+        ) {
+            throw 'live governance proof_retention fields are required.'
+        }
+        $pullRequestProofDays = ConvertTo-VibeContractInteger -Value $contract.proof_retention.pull_request_days -FieldName 'proof retention pull_request_days'
+        $mainScheduledProofDays = ConvertTo-VibeContractInteger -Value $contract.proof_retention.main_and_scheduled_days -FieldName 'proof retention main_and_scheduled_days'
+        if ($pullRequestProofDays -ne 30) {
+            throw 'live governance contract pull request proof retention must be 30 days.'
+        }
+        if ($mainScheduledProofDays -ne 90) {
+            throw 'live governance contract main and scheduled proof retention must be 90 days.'
+        }
+        $formalRelease = (ConvertTo-VibeContractString -Value $contract.proof_retention.formal_release -FieldName 'proof retention formal_release').Trim().ToLowerInvariant()
+        if ($formalRelease -ne 'github_release') {
+            throw 'live governance contract formal release proof retention must use github_release.'
+        }
+        $contract.proof_retention.formal_release = $formalRelease
+
+        $sink = $contract.artifact_sink
+        if (-not (Test-VibeStructuredObject -InputObject $sink)) {
+            throw 'live governance artifact contract artifact_sink must be an object.'
+        }
+        if (-not ($sink.PSObject.Properties.Name -ccontains 'schema_version')) {
+            throw 'live governance artifact contract artifact_sink.schema_version is required.'
+        }
+        $sinkSchemaVersion = ConvertTo-VibeContractInteger -Value $sink.schema_version -FieldName 'artifact sink schema_version'
+    if ($sinkSchemaVersion -le 0) {
         throw 'live governance artifact contract artifact_sink.schema_version must be positive.'
     }
-    if (-not (Test-VibeSafeContractRelativePath -Path ([string]$sink.root))) {
+    if (-not ($sink.PSObject.Properties.Name -ccontains 'root') -or $sink.root -isnot [string] -or -not (Test-VibeSafeContractRelativePath -Path $sink.root)) {
         throw 'live governance artifact contract artifact_sink.root is required.'
     }
-    $sink.root = ConvertTo-VibeContractRelativePath -Path ([string]$sink.root)
-    $requiredArtifacts = @($sink.required_artifacts | ForEach-Object { ([string]$_).Trim() })
+    $sink.root = ConvertTo-VibeContractRelativePath -Path $sink.root
+    if (-not ($sink.PSObject.Properties.Name -ccontains 'required_artifacts') -or -not ($sink.required_artifacts -is [System.Array])) {
+        throw 'live governance artifact contract required_artifacts must be a list.'
+    }
+    $requiredArtifacts = @($sink.required_artifacts | ForEach-Object { (ConvertTo-VibeContractString -Value $_ -FieldName 'required artifact').Trim() })
     if (@($requiredArtifacts | Where-Object { [string]::IsNullOrWhiteSpace($_) }).Count -gt 0) {
         throw 'live governance artifact contract required_artifacts must not contain empty values.'
     }
@@ -2477,7 +2830,10 @@ function Get-VibeLiveGovernanceContract {
     if ($requiredArtifacts.Count -ne 4) {
         throw 'live governance artifact contract required_artifacts contains unsupported kinds.'
     }
-    $requiredMetadata = @($sink.required_metadata | ForEach-Object { ([string]$_).Trim() })
+    if (-not ($sink.PSObject.Properties.Name -ccontains 'required_metadata') -or -not ($sink.required_metadata -is [System.Array])) {
+        throw 'live governance artifact contract required_metadata must be a list.'
+    }
+    $requiredMetadata = @($sink.required_metadata | ForEach-Object { (ConvertTo-VibeContractString -Value $_ -FieldName 'required metadata').Trim() })
     if (@($requiredMetadata | Where-Object { [string]::IsNullOrWhiteSpace($_) }).Count -gt 0) {
         throw 'live governance artifact contract required_metadata must not contain empty values.'
     }
@@ -2491,7 +2847,10 @@ function Get-VibeLiveGovernanceContract {
             throw ("live governance artifact contract is missing required metadata: {0}" -f $requiredField)
         }
     }
-    if (-not ($sink.PSObject.Properties.Name -contains 'artifact_paths') -or $null -eq $sink.artifact_paths) {
+    if (
+        -not ($sink.PSObject.Properties.Name -ccontains 'artifact_paths') -or
+        -not (Test-VibeStructuredObject -InputObject $sink.artifact_paths)
+    ) {
         throw 'live governance artifact contract artifact_sink.artifact_paths is required.'
     }
     $artifactPathProperties = @($sink.artifact_paths.PSObject.Properties)
@@ -2502,7 +2861,10 @@ function Get-VibeLiveGovernanceContract {
     ) {
         throw 'live governance artifact contract artifact_paths must exactly match required_artifacts.'
     }
-    if (-not ($sink.PSObject.Properties.Name -contains 'primary_document_paths') -or $null -eq $sink.primary_document_paths) {
+    if (
+        -not ($sink.PSObject.Properties.Name -ccontains 'primary_document_paths') -or
+        -not (Test-VibeStructuredObject -InputObject $sink.primary_document_paths)
+    ) {
         throw 'live governance artifact contract artifact_sink.primary_document_paths is required.'
     }
     $primaryDocumentPathProperties = @($sink.primary_document_paths.PSObject.Properties)
@@ -2513,33 +2875,69 @@ function Get-VibeLiveGovernanceContract {
     ) {
         throw 'live governance artifact contract primary_document_paths must define exactly requirement and plan.'
     }
-    if (-not ($sink.PSObject.Properties.Name -contains 'manifest_path') -or -not (Test-VibeSafeContractRelativePath -Path ([string]$sink.manifest_path)) ) {
+    if (-not ($sink.PSObject.Properties.Name -ccontains 'manifest_path') -or $sink.manifest_path -isnot [string] -or -not (Test-VibeSafeContractRelativePath -Path $sink.manifest_path)) {
         throw 'live governance artifact contract artifact_sink.manifest_path is required.'
     }
-    if (-not ($sink.PSObject.Properties.Name -contains 'legacy_compatibility_path') -or -not (Test-VibeSafeContractRelativePath -Path ([string]$sink.legacy_compatibility_path)) ) {
+    if (-not ($sink.PSObject.Properties.Name -ccontains 'legacy_compatibility_path') -or $sink.legacy_compatibility_path -isnot [string] -or -not (Test-VibeSafeContractRelativePath -Path $sink.legacy_compatibility_path)) {
         throw 'live governance artifact contract artifact_sink.legacy_compatibility_path is required.'
     }
     $allResolvedPaths = @()
     foreach ($property in @($artifactPathProperties + $primaryDocumentPathProperties)) {
-        $relative = ConvertTo-VibeContractRelativePath -Path ([string]$property.Value)
+        $relative = ConvertTo-VibeContractRelativePath -Path (ConvertTo-VibeContractString -Value $property.Value -FieldName ("artifact path for {0}" -f [string]$property.Name))
         if (-not (Test-VibeSafeContractRelativePath -Path $relative)) {
             throw ("artifact path must be safe and relative: {0}" -f [string]$property.Name)
         }
         $property.Value = $relative
         $allResolvedPaths += $relative
     }
-    $sink.manifest_path = ConvertTo-VibeContractRelativePath -Path ([string]$sink.manifest_path)
-    $sink.legacy_compatibility_path = ConvertTo-VibeContractRelativePath -Path ([string]$sink.legacy_compatibility_path)
+    $sink.manifest_path = ConvertTo-VibeContractRelativePath -Path $sink.manifest_path
+    $sink.legacy_compatibility_path = ConvertTo-VibeContractRelativePath -Path $sink.legacy_compatibility_path
     $allResolvedPaths += [string]$sink.manifest_path
     $allResolvedPaths += [string]$sink.legacy_compatibility_path
     $resolvedPathSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     if (@($allResolvedPaths | Where-Object { -not $resolvedPathSet.Add($_) }).Count -gt 0) {
         throw 'artifact, primary document, and manifest paths must be distinct.'
     }
-    if (-not ($sink.PSObject.Properties.Name -contains 'legacy_documentation_roots') -or $null -eq $sink.legacy_documentation_roots) {
+    if (-not ($sink.PSObject.Properties.Name -ccontains 'session_receipts') -or -not (Test-VibeStructuredObject -InputObject $sink.session_receipts)) {
+        throw 'live governance artifact contract artifact_sink.session_receipts is required.'
+    }
+    $sessionReceipts = $sink.session_receipts
+    if (-not ($sessionReceipts.PSObject.Properties.Name -ccontains 'root') -or $sessionReceipts.root -isnot [string] -or -not (Test-VibeSafeContractRelativePath -Path $sessionReceipts.root)) {
+        throw 'live governance artifact contract artifact_sink.session_receipts.root is required.'
+    }
+    $sessionReceipts.root = ConvertTo-VibeContractRelativePath -Path $sessionReceipts.root
+    if (
+        -not ($sessionReceipts.PSObject.Properties.Name -ccontains 'owner') -or
+        -not ($sessionReceipts.PSObject.Properties.Name -ccontains 'retention')
+    ) {
+        throw 'live governance session_receipts owner and retention fields are required.'
+    }
+    $sessionReceiptOwner = (ConvertTo-VibeContractString -Value $sessionReceipts.owner -FieldName 'session receipt owner').Trim().ToLowerInvariant()
+    if ($sessionReceiptOwner -ne 'runtime') {
+        throw 'live governance artifact contract session receipt owner must be runtime.'
+    }
+    $sessionReceipts.owner = $sessionReceiptOwner
+    $sessionReceiptRetention = (ConvertTo-VibeContractString -Value $sessionReceipts.retention -FieldName 'session receipt retention').Trim().ToLowerInvariant()
+    if ($sessionReceiptRetention -ne 'workspace_local') {
+        throw 'live governance artifact contract session receipt retention must be workspace_local.'
+    }
+    $sessionReceipts.retention = $sessionReceiptRetention
+    if (
+        -not ($sessionReceipts.PSObject.Properties.Name -ccontains 'copy_to_artifact_sink') -or
+        $sessionReceipts.copy_to_artifact_sink -isnot [bool] -or
+        $sessionReceipts.copy_to_artifact_sink -ne $true
+    ) {
+        throw 'live governance artifact contract session_receipts.copy_to_artifact_sink must be true.'
+    }
+    $sessionReceipts.copy_to_artifact_sink = $true
+    if (-not ($sink.PSObject.Properties.Name -ccontains 'legacy_projection_root') -or $sink.legacy_projection_root -isnot [string] -or -not (Test-VibeSafeContractRelativePath -Path $sink.legacy_projection_root)) {
+        throw 'live governance artifact contract artifact_sink.legacy_projection_root is required.'
+    }
+    $sink.legacy_projection_root = ConvertTo-VibeContractRelativePath -Path $sink.legacy_projection_root
+    if (-not ($sink.PSObject.Properties.Name -ccontains 'legacy_documentation_roots') -or -not ($sink.legacy_documentation_roots -is [System.Array])) {
         throw 'live governance artifact contract artifact_sink.legacy_documentation_roots is required.'
     }
-    $legacyRoots = @($sink.legacy_documentation_roots | ForEach-Object { ConvertTo-VibeContractRelativePath -Path ([string]$_) })
+    $legacyRoots = @($sink.legacy_documentation_roots | ForEach-Object { ConvertTo-VibeContractRelativePath -Path (ConvertTo-VibeContractString -Value $_ -FieldName 'legacy documentation root') })
     $legacyRootSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     if ($legacyRoots.Count -ne 2 -or @($legacyRoots | Where-Object { -not $legacyRootSet.Add($_) }).Count -gt 0) {
         throw 'legacy_documentation_roots must map requirement and plan with unique paths.'
@@ -2548,21 +2946,34 @@ function Get-VibeLiveGovernanceContract {
         if (-not (Test-VibeSafeContractRelativePath -Path $legacyRoot)) {
             throw 'legacy_documentation_roots must contain safe relative paths.'
         }
+        if (
+            ([string]$sink.root).Equals($legacyRoot, [System.StringComparison]::OrdinalIgnoreCase) -or
+            ([string]$sink.root).StartsWith($legacyRoot + '/', [System.StringComparison]::OrdinalIgnoreCase)
+        ) {
+            throw 'historical documentation roots cannot be primary artifact destinations.'
+        }
     }
     $sink.legacy_documentation_roots = $legacyRoots
-    if (-not ($sink.PSObject.Properties.Name -contains 'legacy_removal_release') -or [string]::IsNullOrWhiteSpace([string]$sink.legacy_removal_release)) {
+    if (-not ($sink.PSObject.Properties.Name -ccontains 'legacy_removal_release') -or $sink.legacy_removal_release -isnot [string] -or [string]::IsNullOrWhiteSpace($sink.legacy_removal_release)) {
         throw 'live governance artifact contract artifact_sink.legacy_removal_release is required.'
     }
-    $sink.legacy_removal_release = ([string]$sink.legacy_removal_release).Trim()
-    if (-not ($sink.PSObject.Properties.Name -contains 'legacy_write_mode')) {
+    $sink.legacy_removal_release = $sink.legacy_removal_release.Trim()
+    if (-not ($sink.PSObject.Properties.Name -ccontains 'legacy_write_mode') -or $sink.legacy_write_mode -isnot [string]) {
         throw 'live governance artifact contract artifact_sink.legacy_write_mode is required.'
     }
-    $legacyWriteMode = ([string]$sink.legacy_write_mode).Trim().ToLowerInvariant()
+    $legacyWriteMode = $sink.legacy_write_mode.Trim().ToLowerInvariant()
     if ($legacyWriteMode -notin @('disabled', 'dual_write', 'explicit')) {
         throw 'live governance artifact contract artifact_sink.legacy_write_mode is invalid.'
     }
     $sink.legacy_write_mode = $legacyWriteMode
-    return $contract
+        return $contract
+    } catch {
+        $message = [string]$_.Exception.Message
+        if ($message.StartsWith('live governance artifact contract is required', [System.StringComparison]::Ordinal)) {
+            throw
+        }
+        throw ("live governance artifact contract is required: {0}: {1}" -f $contractPath, $message)
+    }
 }
 
 function Resolve-VibeContractWorkspaceRoot {
@@ -2580,9 +2991,10 @@ function Resolve-VibeContractWorkspaceRoot {
     } else {
         [System.IO.Path]::GetFullPath($RepoRoot)
     }
-    $normalized = $resolved.Replace('\', '/').TrimEnd('/').ToLowerInvariant()
-    foreach ($legacyRoot in @($contract.artifact_sink.legacy_documentation_roots | ForEach-Object { ([string]$_).Replace('\', '/') })) {
-        if ($normalized.EndsWith('/' + $legacyRoot)) {
+    $normalized = '/' + $resolved.Replace('\', '/').Trim('/').ToLowerInvariant() + '/'
+    foreach ($legacyRoot in @($contract.artifact_sink.legacy_documentation_roots)) {
+        $normalizedLegacyRoot = '/' + ([string]$legacyRoot).Replace('\', '/').Trim('/').ToLowerInvariant() + '/'
+        if ($normalized.Contains($normalizedLegacyRoot)) {
             throw 'historical documentation roots cannot be used as the artifact workspace.'
         }
     }
@@ -2662,7 +3074,12 @@ function Get-VibeArtifactContractDescriptor {
     $paths = Get-VibeRunArtifactPaths -RepoRoot $RepoRoot -RunId $normalizedRunId -WorkspaceRoot $WorkspaceRoot -ArtifactRoot $ArtifactRoot
     $workspace = Resolve-VibeContractWorkspaceRoot -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -ArtifactRoot $ArtifactRoot
     $relativeRoot = (([string]$contract.artifact_sink.root).Replace('\', '/').TrimEnd('/') + '/' + $normalizedRunId)
-    $artifactRoot = Get-VibeRunArtifactRoot `
+    $runArtifactRoot = Get-VibeRunArtifactRoot `
+        -RepoRoot $RepoRoot `
+        -RunId $normalizedRunId `
+        -WorkspaceRoot $WorkspaceRoot `
+        -ArtifactRoot $ArtifactRoot
+    $sessionRoot = Get-VibeSessionRoot `
         -RepoRoot $RepoRoot `
         -RunId $normalizedRunId `
         -WorkspaceRoot $WorkspaceRoot `
@@ -2672,8 +3089,9 @@ function Get-VibeArtifactContractDescriptor {
         schema_version = [int]$contract.artifact_sink.schema_version
         run_id = $normalizedRunId
         workspace_root = $workspace
-        artifact_root = $artifactRoot
+        artifact_root = $runArtifactRoot
         artifact_root_relative = $relativeRoot
+        session_root = $sessionRoot
         paths = $paths
         required_artifacts = @($contract.artifact_sink.required_artifacts | ForEach-Object { [string]$_ })
         primary_document_paths = [pscustomobject]@{
@@ -2685,6 +3103,7 @@ function Get-VibeArtifactContractDescriptor {
             requirement = $legacyRoots[0]
             plan = $legacyRoots[1]
         }
+        legacy_projection_root = [string]$contract.artifact_sink.legacy_projection_root
         legacy_removal_release = [string]$contract.artifact_sink.legacy_removal_release
         legacy_write_mode = [string]$contract.artifact_sink.legacy_write_mode
     }
@@ -2742,7 +3161,21 @@ function Write-VibeRunArtifactBundle {
     $contract = Get-VibeLiveGovernanceContract -RepoRoot $RepoRoot
     $descriptor = Get-VibeArtifactContractDescriptor -RepoRoot $RepoRoot -RunId $RunId -WorkspaceRoot $WorkspaceRoot -ArtifactRoot $ArtifactRoot
     $normalizedRunId = [string]$descriptor.run_id
-    $resolvedLegacyWrites = @($LegacyWrites | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+    $declaredLegacyRoots = @(
+        @($contract.artifact_sink.legacy_documentation_roots | ForEach-Object { [string]$_ }) +
+        @([string]$contract.artifact_sink.legacy_projection_root)
+    )
+    $resolvedLegacyWrites = @()
+    $seenLegacyWrites = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($legacyWrite in @($LegacyWrites)) {
+        $normalizedWrite = ConvertTo-VibeLegacyWriteDestination `
+            -Value $legacyWrite `
+            -WorkspaceRoot ([string]$descriptor.workspace_root) `
+            -DeclaredRoots $declaredLegacyRoots
+        if ($seenLegacyWrites.Add($normalizedWrite)) {
+            $resolvedLegacyWrites += $normalizedWrite
+        }
+    }
     if ([string]$contract.artifact_sink.legacy_write_mode -eq 'disabled' -and $resolvedLegacyWrites.Count -gt 0) {
         throw 'disabled legacy compatibility cannot declare writes.'
     }
@@ -2776,6 +3209,23 @@ function Write-VibeRunArtifactBundle {
     foreach ($kind in @($contract.artifact_sink.required_artifacts | ForEach-Object { [string]$_ })) {
         $manifestArtifacts[$kind] = ([string]$contract.artifact_sink.artifact_paths.$kind).Replace('\', '/')
     }
+    $legacyWriteRecords = @(
+        $resolvedLegacyWrites | ForEach-Object {
+            [pscustomobject]@{
+                destination = [string]$_
+                mode = [string]$contract.artifact_sink.legacy_write_mode
+                removal_release = [string]$contract.artifact_sink.legacy_removal_release
+            }
+        }
+    )
+    $legacyCompatibility = [ordered]@{
+        mode = [string]$contract.artifact_sink.legacy_write_mode
+        removal_release = [string]$contract.artifact_sink.legacy_removal_release
+        documentation_roots = @($contract.artifact_sink.legacy_documentation_roots | ForEach-Object { [string]$_ })
+        writes = @($resolvedLegacyWrites)
+        write_records = @($legacyWriteRecords)
+        observable = $true
+    }
     $manifest = [pscustomobject]@{
         schema_version = [int]$contract.artifact_sink.schema_version
         run_id = $normalizedRunId
@@ -2783,24 +3233,19 @@ function Write-VibeRunArtifactBundle {
         artifacts = $manifestArtifacts
         commit_sha = Get-VibeArtifactCommitSha -RepoRoot $RepoRoot
         execution_environment = [pscustomobject]$environment
-        legacy_compatibility = [pscustomobject]@{
-            mode = [string]$contract.artifact_sink.legacy_write_mode
-            removal_release = [string]$contract.artifact_sink.legacy_removal_release
-            documentation_roots = @($contract.artifact_sink.legacy_documentation_roots | ForEach-Object { [string]$_ })
-            writes = @($resolvedLegacyWrites)
-            observable = $true
-        }
+        legacy_compatibility = [pscustomobject]$legacyCompatibility
     }
     Write-VibeJsonArtifact -Path ([string]$descriptor.paths.manifest) -Value $manifest
-    Write-VibeJsonArtifact -Path ([string]$descriptor.paths.legacy_compatibility) -Value ([pscustomobject]@{
+    $legacyCompatibilityArtifact = [ordered]@{
         run_id = $normalizedRunId
         artifact_root = [string]$descriptor.artifact_root_relative
-        mode = [string]$contract.artifact_sink.legacy_write_mode
-        removal_release = [string]$contract.artifact_sink.legacy_removal_release
-        documentation_roots = @($contract.artifact_sink.legacy_documentation_roots | ForEach-Object { [string]$_ })
-        writes = @($resolvedLegacyWrites)
-        observable = $true
-    })
+    }
+    foreach ($entry in $legacyCompatibility.GetEnumerator()) {
+        $legacyCompatibilityArtifact[[string]$entry.Key] = $entry.Value
+    }
+    Write-VibeJsonArtifact `
+        -Path ([string]$descriptor.paths.legacy_compatibility) `
+        -Value ([pscustomobject]$legacyCompatibilityArtifact)
     return [pscustomobject]@{
         descriptor = $descriptor
         manifest = $manifest
@@ -2816,6 +3261,20 @@ function Sync-VibeSessionArtifactsToRunRoot {
 
     $resolvedSessionRoot = [System.IO.Path]::GetFullPath($SessionRoot)
     $resolvedRunRoot = [System.IO.Path]::GetFullPath($RunArtifactRoot)
+    if (-not (Test-VibeObjectHasProperty -InputObject $ArtifactDescriptor -PropertyName 'session_root')) {
+        throw 'Artifact descriptor must declare session_root before session artifacts can be synchronized.'
+    }
+    if (-not (Test-VibeObjectHasProperty -InputObject $ArtifactDescriptor -PropertyName 'artifact_root')) {
+        throw 'Artifact descriptor must declare artifact_root before session artifacts can be synchronized.'
+    }
+    $declaredSessionRoot = [System.IO.Path]::GetFullPath([string]$ArtifactDescriptor.session_root)
+    if (-not $resolvedSessionRoot.Equals($declaredSessionRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw ("Session receipt source must match the contract-declared run root: {0}" -f $declaredSessionRoot)
+    }
+    $declaredRunRoot = [System.IO.Path]::GetFullPath([string]$ArtifactDescriptor.artifact_root)
+    if (-not $resolvedRunRoot.Equals($declaredRunRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw ("Session receipt destination must match the contract-declared run artifact root: {0}" -f $declaredRunRoot)
+    }
     $separator = [string][System.IO.Path]::DirectorySeparatorChar
     $sessionPrefix = $resolvedSessionRoot.TrimEnd('\', '/') + $separator
     $runPrefix = $resolvedRunRoot.TrimEnd('\', '/') + $separator
@@ -2871,7 +3330,14 @@ function Initialize-VibeWorkspaceProjectDescriptor {
             legacy_requirement_root = $legacyRoots[0]
             legacy_execution_plan_root = $legacyRoots[1]
             legacy_documentation_roots = @($legacyRoots)
-            session_root = 'outputs/runtime/vibe-sessions'
+            legacy_projection_root = [string]$governanceSink.legacy_projection_root
+            session_root = [string]$governanceSink.session_receipts.root
+            session_receipts = [pscustomobject]@{
+                root = [string]$governanceSink.session_receipts.root
+                owner = [string]$governanceSink.session_receipts.owner
+                retention = [string]$governanceSink.session_receipts.retention
+                copy_to_artifact_sink = [bool]$governanceSink.session_receipts.copy_to_artifact_sink
+            }
             primary_document_paths = $governanceSink.primary_document_paths
             artifact_paths = $governanceSink.artifact_paths
             manifest_path = [string]$governanceSink.manifest_path
@@ -2982,6 +3448,42 @@ function Get-VibeHierarchyState {
         allow_plan_freeze = [bool]$authoritySource.allow_plan_freeze
         allow_global_dispatch = [bool]$authoritySource.allow_global_dispatch
         allow_completion_claim = [bool]$authoritySource.allow_completion_claim
+    }
+}
+
+function Assert-VibeInheritedCanonicalDocumentPaths {
+    param(
+        [Parameter(Mandatory)] [object]$HierarchyState,
+        [Parameter(Mandatory)] [string]$RepoRoot,
+        [AllowEmptyString()] [string]$WorkspaceRoot = '',
+        [AllowEmptyString()] [string]$ArtifactRoot = ''
+    )
+
+    if ([string]$HierarchyState.governance_scope -ne 'child') {
+        return
+    }
+    if (
+        [string]::IsNullOrWhiteSpace([string]$HierarchyState.root_run_id) -or
+        [string]::IsNullOrWhiteSpace([string]$HierarchyState.inherited_requirement_doc_path) -or
+        [string]::IsNullOrWhiteSpace([string]$HierarchyState.inherited_execution_plan_path)
+    ) {
+        throw 'Child-governed runtime requires canonical inherited requirement and plan paths.'
+    }
+
+    $rootPaths = Get-VibeRunArtifactPaths `
+        -RepoRoot $RepoRoot `
+        -RunId ([string]$HierarchyState.root_run_id) `
+        -WorkspaceRoot $WorkspaceRoot `
+        -ArtifactRoot $ArtifactRoot
+    $expectedRequirementPath = [System.IO.Path]::GetFullPath([string]$rootPaths.primary_requirement)
+    $expectedPlanPath = [System.IO.Path]::GetFullPath([string]$rootPaths.primary_plan)
+    $actualRequirementPath = [System.IO.Path]::GetFullPath([string]$HierarchyState.inherited_requirement_doc_path)
+    $actualPlanPath = [System.IO.Path]::GetFullPath([string]$HierarchyState.inherited_execution_plan_path)
+    if (-not $actualRequirementPath.Equals($expectedRequirementPath, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw ("Child inherited requirement path must match the root run canonical requirement: {0}" -f $expectedRequirementPath)
+    }
+    if (-not $actualPlanPath.Equals($expectedPlanPath, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw ("Child inherited execution plan path must match the root run canonical plan: {0}" -f $expectedPlanPath)
     }
 }
 
@@ -4909,7 +5411,9 @@ function Get-VibeSessionRoot {
 
     $normalizedRunId = Resolve-VibeSafeRunId -RunId $RunId
     $baseRoot = Get-VibeArtifactRoot -RepoRoot $RepoRoot -Runtime $Runtime -WorkspaceRoot $WorkspaceRoot -ArtifactRoot $ArtifactRoot
-    return [System.IO.Path]::GetFullPath((Join-Path $baseRoot ("outputs\runtime\vibe-sessions\{0}" -f $normalizedRunId)))
+    $contract = Get-VibeLiveGovernanceContract -RepoRoot $RepoRoot
+    $sessionRootRelative = ([string]$contract.artifact_sink.session_receipts.root).Replace('/', [string][System.IO.Path]::DirectorySeparatorChar)
+    return [System.IO.Path]::GetFullPath((Join-Path (Join-Path $baseRoot $sessionRootRelative) $normalizedRunId))
 }
 
 function Ensure-VibeSessionRoot {
