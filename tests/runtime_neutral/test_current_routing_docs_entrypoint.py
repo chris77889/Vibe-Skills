@@ -39,20 +39,17 @@ def test_runtime_field_contract_puts_work_truth_before_compatibility_chain() -> 
     assert "must not populate `agent_skill_organization`, bind work, or" in text
 
 
-def test_governance_readme_points_to_work_truth_before_routing_history() -> None:
+def test_governance_readme_points_to_current_work_truth_contracts() -> None:
     text = read_doc("README.md")
 
-    current_index = text.index("current runtime truth and routing compatibility contracts")
+    current_index = text.index("This directory contains the current governance contracts")
     current_fields_index = text.index(
         "[`current-runtime-field-contract.md`](current-runtime-field-contract.md)"
     )
     current_route_index = text.index("[`current-routing-contract.md`](current-routing-contract.md)")
-    history_index = text.index(
-        "[`historical-routing-terminology.md`](historical-routing-terminology.md)"
-    )
-
-    assert current_index < current_fields_index < current_route_index < history_index
-    assert current_index < current_fields_index < history_index
+    assert current_index < current_fields_index < current_route_index
+    assert "archive/" not in text
+    assert "historical-routing-terminology.md" not in text
     assert "specialist-dispatch-governance.md" not in text
 
 
@@ -140,18 +137,12 @@ def test_retired_router_exact_golden_gate_is_absent_from_current_surfaces() -> N
     ).exists()
 
     current_surfaces = [
-        "docs/contributor-default-runbooks.md",
         "docs/developer-change-governance.md",
-        "docs/operator-default-runbooks.md",
-        "docs/status/non-regression-proof-bundle.md",
-        "docs/status/protected-capability-baseline.md",
-        "docs/governance/router-modularization-governance.md",
-        "docs/architecture/legacy-topology-audit.md",
+        "docs/README.md",
+        "docs/governance/README.md",
         "references/change-proof-matrix.md",
         "scripts/verify/README.md",
         "scripts/verify/gate-family-index.md",
-        "tests/replay/README.md",
-        "tests/replay/route/README.md",
     ]
     for relative_path in current_surfaces:
         text = (REPO_ROOT / relative_path).read_text(encoding="utf-8")

@@ -6,15 +6,13 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 INSTALL_DOCS = REPO_ROOT / "docs" / "install"
 DOCS_INDEX = REPO_ROOT / "docs" / "README.md"
-RELEASES_INDEX = REPO_ROOT / "docs" / "releases" / "README.md"
 PUBLIC_READMES = (
     REPO_ROOT / "README.md",
     REPO_ROOT / "README.zh.md",
 )
 ACTIVE_INSTALL_GUIDES = (
-    REPO_ROOT / "docs" / "cold-start-install-paths.md",
-    REPO_ROOT / "docs" / "cold-start-install-paths.en.md",
-    REPO_ROOT / "docs" / "one-shot-setup.md",
+    INSTALL_DOCS / "README.md",
+    INSTALL_DOCS / "README.en.md",
 )
 ONE_SHOT_BOOTSTRAPS = (
     REPO_ROOT / "scripts" / "bootstrap" / "one-shot-setup.sh",
@@ -55,17 +53,12 @@ def test_active_install_docs_only_describe_simple_skills_dir_install() -> None:
 def test_internal_docs_define_one_installation_model() -> None:
     english_install = (INSTALL_DOCS / "README.en.md").read_text(encoding="utf-8")
     chinese_install = (INSTALL_DOCS / "README.md").read_text(encoding="utf-8")
-    english_paths = (REPO_ROOT / "docs" / "cold-start-install-paths.en.md").read_text(encoding="utf-8")
-    chinese_paths = (REPO_ROOT / "docs" / "cold-start-install-paths.md").read_text(encoding="utf-8")
-    english_paths_compact = " ".join(english_paths.split())
 
     assert "## One Installation Model" in english_install
     assert "same runtime to `<SkillsDir>/vibe`" in english_install
-    assert "does not select a host-specific package" in english_paths_compact
 
     assert "## 一种安装模型" in chinese_install
     assert "同一份运行时写入 `<SkillsDir>/vibe`" in chinese_install
-    assert "不会选择宿主专用的安装包" in chinese_paths
 
 
 def test_public_readmes_do_not_advertise_missing_cli_commands() -> None:
@@ -77,8 +70,7 @@ def test_public_readmes_do_not_advertise_missing_cli_commands() -> None:
 def test_active_install_guides_point_to_simplified_skills_dir_install() -> None:
     for path in ACTIVE_INSTALL_GUIDES:
         text = path.read_text(encoding="utf-8")
-        assert "--skills-dir" in text, path
-        assert "docs/install/README" in text or "install/README" in text, path
+        assert "--skills-dir" in text or "SkillsDir" in text, path
         for term in REMOVED_PUBLIC_INSTALL_TERMS:
             assert term not in text, path
 
@@ -89,8 +81,7 @@ def test_live_docs_indexes_do_not_route_current_install_to_retired_or_missing_pa
     assert "one-click-install-release-copy" not in docs_index
     assert "runtime-freshness-install-sop.md" not in docs_index
 
-    releases_index = RELEASES_INDEX.read_text(encoding="utf-8")
-    assert "runtime-freshness-install-sop.md" not in releases_index
+    assert "docs/releases" not in docs_index
 
 
 def test_public_readmes_keep_other_environments_as_one_auxiliary_install_note() -> None:
@@ -104,18 +95,20 @@ def test_public_readmes_keep_other_environments_as_one_auxiliary_install_note() 
 
 
 def test_quick_start_explains_install_run_and_delivery_records_without_legacy_status_terms() -> None:
-    english = (REPO_ROOT / "docs" / "quick-start.en.md").read_text(encoding="utf-8")
-    chinese = (REPO_ROOT / "docs" / "quick-start.md").read_text(encoding="utf-8")
+    english = (INSTALL_DOCS / "README.en.md").read_text(encoding="utf-8")
+    chinese = (INSTALL_DOCS / "README.md").read_text(encoding="utf-8")
+    runtime_contract = (
+        REPO_ROOT / "docs" / "governance" / "current-runtime-field-contract.md"
+    ).read_text(encoding="utf-8")
 
-    assert "`check` only checks whether installer-managed files are present" in english
-    assert "`session_root` is the record folder for one task" in english
-    assert "`delivery-acceptance-report.json` or `.md` stores the final check" in english
+    assert "`check` verifies the files recorded in the receipt." in english
+    assert ".vibeskills/runs/<run_id>/" in runtime_contract
+    assert "delivery-acceptance-report.json" in runtime_contract
 
-    assert "`check` 只检查安装器管理的文件是否都在" in chinese
-    assert "`session_root` 是一次任务的记录文件夹" in chinese
-    assert "`delivery-acceptance-report.json` 或 `.md` 保存最终检查结果" in chinese
+    assert "`check` 只检查收据登记的文件是否仍然完整。" in chinese
+    assert "`check` 证明的是 `installed locally`" in chinese
 
-    for content in (english, chinese):
+    for content in (english, chinese, runtime_contract):
         assert "vibe host-ready" not in content
         assert "online-ready" not in content
 

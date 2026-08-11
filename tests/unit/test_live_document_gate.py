@@ -50,6 +50,42 @@ def test_live_document_gate_ignores_markdown_outside_governed_roots() -> None:
     assert result["validated_added_documents"] == []
 
 
+def test_live_document_gate_reports_backlog_and_strict_failure() -> None:
+    module = _load_module()
+    contract = module.load_live_governance_contract(REPO_ROOT)
+    tracked_paths = [
+        *(document.path for document in contract.documents),
+        "THIRD_PARTY_LICENSES.md",
+        "docs/unregistered-history.md",
+        "bundled/skills/example/SKILL.md",
+    ]
+
+    migration = module.evaluate(
+        REPO_ROOT,
+        [],
+        census_mode="migration-report",
+        tracked_markdown_paths=tracked_paths,
+    )
+    strict = module.evaluate(
+        REPO_ROOT,
+        [],
+        census_mode="strict",
+        tracked_markdown_paths=tracked_paths,
+    )
+
+    assert migration["result"] == "PASS"
+    assert migration["census_mode"] == "migration-report"
+    assert migration["census"]["counts"] == {
+        "registered": len(contract.documents),
+        "excluded": 1,
+        "unregistered": 1,
+    }
+    assert strict["result"] == "FAIL"
+    assert strict["census_mode"] == "strict"
+    assert strict["failure"] == "strict census found 1 unregistered governed Markdown document"
+    assert strict["census"] == migration["census"]
+
+
 def test_developer_entry_uses_stable_live_contract_without_dated_plan() -> None:
     contract_text = DEVELOPER_ENTRY_CONTRACT.read_text(encoding="utf-8")
     contributing_text = CONTRIBUTING.read_text(encoding="utf-8")
@@ -95,3 +131,44 @@ def test_collect_added_paths_treats_renamed_markdown_as_an_addition(
     added_paths = module.collect_added_paths(tmp_path, base_ref)
 
     assert added_paths == ["docs/new-live.md"]
+
+
+def test_collect_tracked_markdown_paths_is_nul_safe_and_deterministic(
+    tmp_path: Path,
+) -> None:
+    module = _load_module()
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    tracked_paths = [
+        tmp_path / "README.md",
+        tmp_path / "docs" / "Guide With Spaces.MD",
+        tmp_path / "docs" / "ignored.txt",
+    ]
+    for path in tracked_paths:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("# Tracked\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=tmp_path, check=True)
+
+    assert module.collect_tracked_markdown_paths(tmp_path) == [
+        "docs/Guide With Spaces.MD",
+        "README.md",
+    ]
+
+
+def test_collect_tracked_markdown_paths_reflects_worktree_state(
+    tmp_path: Path,
+) -> None:
+    module = _load_module()
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+
+    removed = tmp_path / "docs" / "removed.md"
+    removed.parent.mkdir(parents=True)
+    removed.write_text("# Removed\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=tmp_path, check=True)
+    removed.unlink()
+
+    untracked = tmp_path / "docs" / "untracked.md"
+    untracked.write_text("# Untracked\n", encoding="utf-8")
+
+    assert module.collect_tracked_markdown_paths(tmp_path) == [
+        "docs/untracked.md",
+    ]

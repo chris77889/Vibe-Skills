@@ -18,7 +18,6 @@ Python direct-first is the current happy path.
 | Path | Role |
 | --- | --- |
 | [`resolve-pack-route.ps1`](resolve-pack-route.ps1) | compatibility bridge；保留旧 PowerShell 调用方需要的候选发现与兼容字段 |
-| [`legacy/`](legacy) | 兼容旧 routing 路径的辅助实现 |
 | [`modules/`](modules) | legacy/helper/compatibility；旧规则候选、澄清提示、候选排序、确认界面的辅助模块 |
 
 ## Rule

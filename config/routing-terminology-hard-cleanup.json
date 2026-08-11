@@ -97,9 +97,7 @@
     "protocols",
     "docs/governance/current-routing-contract.md",
     "docs/governance/current-runtime-field-contract.md",
-    "docs/governance/terminology-governance.md",
     "docs/install",
-    "docs/status",
     "packages/verification-core/src/vgo_verify",
     "packages/runtime-core/src/vgo_runtime",
     "scripts/router",
@@ -116,8 +114,7 @@
   ],
   "historical_surface_exemptions": [
     "docs/governance/current-routing-contract.md",
-    "docs/governance/current-runtime-field-contract.md",
-    "docs/governance/terminology-governance.md"
+    "docs/governance/current-runtime-field-contract.md"
   ],
   "allowed_negative_files": [
     "tests/runtime_neutral/test_runtime_route_output_shape.py",

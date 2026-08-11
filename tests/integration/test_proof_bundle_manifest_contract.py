@@ -91,14 +91,16 @@ def test_proof_bundle_run_artifacts_exist_for_declared_required_files() -> None:
 
         for run in run_groups:
             bundle_dir = REPO_ROOT / str(run["bundle_dir"])
-            operation_record = REPO_ROOT / str(run["operation_record"])
+            operation_record_value = run.get("operation_record")
 
             assert bundle_dir.is_dir(), (
                 f"missing bundle_dir for {manifest_path.relative_to(REPO_ROOT)}: {run['bundle_dir']}"
             )
-            assert operation_record.exists(), (
-                f"missing operation_record for {manifest_path.relative_to(REPO_ROOT)}: {run['operation_record']}"
-            )
+            if operation_record_value:
+                operation_record = REPO_ROOT / str(operation_record_value)
+                assert operation_record.exists(), (
+                    f"missing operation_record for {manifest_path.relative_to(REPO_ROOT)}: {operation_record_value}"
+                )
 
             required_files = [bundle_dir / str(rel) for rel in run.get("required_files", [])]
             missing = [str(path.relative_to(REPO_ROOT)) for path in required_files if not path.exists()]

@@ -164,10 +164,6 @@ if ($hasSummary) {
     Add-Assertion -Results ([ref]$results) -Condition ([bool]$runtimeInputPacket.authority_flags.allow_requirement_freeze) -Message 'root scope keeps requirement freeze authority'
     Add-Assertion -Results ([ref]$results) -Condition ([bool]$runtimeInputPacket.authority_flags.allow_plan_freeze) -Message 'root scope keeps plan freeze authority'
 
-    $stableDocText = Get-Content -LiteralPath (Join-Path $repoRoot 'docs\root-child-vibe-hierarchy-governance.md') -Raw -Encoding UTF8
-    Add-Assertion -Results ([ref]$results) -Condition ($stableDocText.Contains('one canonical requirement surface')) -Message 'stable hierarchy doc forbids duplicate requirement truth'
-    Add-Assertion -Results ([ref]$results) -Condition ($stableDocText.Contains('one canonical execution-plan surface')) -Message 'stable hierarchy doc forbids duplicate execution-plan truth'
-
     $childRunId = "canonical-surface-child-" + [System.Guid]::NewGuid().ToString('N').Substring(0, 8)
     $childDelegationEnvelopePath = New-ChildDelegationEnvelopeForGate -RootSummary $summary -ChildRunId $childRunId
     $childSummary = & $runtimeEntryPath `

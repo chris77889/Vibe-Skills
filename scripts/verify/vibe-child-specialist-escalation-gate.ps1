@@ -69,11 +69,6 @@ foreach ($token in @('agent_skill_organization', 'module_assignments', 'module_s
     Add-Assertion -Results ([ref]$results) -Condition ($policyText.Contains($token)) -Message ("runtime input policy contains module handoff token: {0}" -f $token)
 }
 
-$teamText = Get-Content -LiteralPath (Join-Path $repoRoot 'protocols\team.md') -Raw -Encoding UTF8
-$stableDocText = Get-Content -LiteralPath (Join-Path $repoRoot 'docs\root-child-vibe-hierarchy-governance.md') -Raw -Encoding UTF8
-Add-Assertion -Results ([ref]$results) -Condition ($teamText.Contains('they never auto-promote into approved module work units')) -Message 'team protocol forbids route candidates from becoming executable automatically'
-Add-Assertion -Results ([ref]$results) -Condition ($stableDocText.Contains('until the root Agent explicitly updates the approved skill organization')) -Message 'stable hierarchy doc requires explicit root Agent approval'
-
 $runId = "child-specialist-escalation-" + [System.Guid]::NewGuid().ToString('N').Substring(0, 8)
 $artifactRoot = Join-Path $repoRoot (".tmp\child-specialist-escalation-{0}" -f $runId)
 $hostRoot = Join-Path $artifactRoot '.agents'

@@ -18,9 +18,21 @@ if ([string]::IsNullOrWhiteSpace($RunId)) {
 
 $artifactContract = Get-VibeArtifactContractDescriptor -RepoRoot $runtime.repo_root -RunId $RunId -WorkspaceRoot $WorkspaceRoot -ArtifactRoot $ArtifactRoot
 $sessionRoot = Ensure-VibeSessionRoot -RepoRoot $runtime.repo_root -RunId $RunId -Runtime $runtime -WorkspaceRoot $WorkspaceRoot -ArtifactRoot $ArtifactRoot
-$separator = [string][System.IO.Path]::DirectorySeparatorChar
-$legacyRequirementRoot = Join-Path ([string]$artifactContract.workspace_root) ([string]$artifactContract.legacy_documentation_paths.requirement).Replace('/', $separator)
-$legacyPlanRoot = Join-Path ([string]$artifactContract.workspace_root) ([string]$artifactContract.legacy_documentation_paths.plan).Replace('/', $separator)
+$runSinkRoot = [System.IO.Path]::GetDirectoryName([string]$artifactContract.artifact_root)
+$existingRequirementDocs = @()
+$existingPlanDocs = @()
+if (-not [string]::IsNullOrWhiteSpace($runSinkRoot) -and (Test-Path -LiteralPath $runSinkRoot -PathType Container)) {
+    $existingRequirementDocs = @(
+        Get-ChildItem -LiteralPath $runSinkRoot -Recurse -Filter 'requirement.md' -File |
+            ForEach-Object { Get-VibeRelativePathCompat -BasePath ([string]$artifactContract.workspace_root) -TargetPath ([string]$_.FullName) } |
+            Sort-Object
+    )
+    $existingPlanDocs = @(
+        Get-ChildItem -LiteralPath $runSinkRoot -Recurse -Filter 'plan.md' -File |
+            ForEach-Object { Get-VibeRelativePathCompat -BasePath ([string]$artifactContract.workspace_root) -TargetPath ([string]$_.FullName) } |
+            Sort-Object
+    )
+}
 $requiredPaths = @(
     'SKILL.md',
     'protocols/runtime.md',
@@ -65,16 +77,8 @@ $receipt = [pscustomobject]@{
     git_branch = $gitBranch
     git_status = @($gitStatus)
     required_paths = @($pathChecks)
-    existing_requirement_docs = @(
-        if (Test-Path -LiteralPath $legacyRequirementRoot) {
-            Get-ChildItem -LiteralPath $legacyRequirementRoot -Filter *.md -File | Select-Object -ExpandProperty Name
-        }
-    )
-    existing_plan_docs = @(
-        if (Test-Path -LiteralPath $legacyPlanRoot) {
-            Get-ChildItem -LiteralPath $legacyPlanRoot -Filter *.md -File | Select-Object -ExpandProperty Name
-        }
-    )
+    existing_requirement_docs = @($existingRequirementDocs)
+    existing_plan_docs = @($existingPlanDocs)
 }
 
 $receiptPath = Join-Path $sessionRoot 'skeleton-receipt.json'

@@ -208,6 +208,7 @@ $planPath = if ($isChildScope) {
     Get-VibeExecutionPlanPath `
         -RepoRoot $runtime.repo_root `
         -Task $Task `
+        -RunId $RunId `
         -ArtifactRoot $ArtifactRoot `
         -WorkspaceRoot $WorkspaceRoot
 }
@@ -220,6 +221,15 @@ $legacyDocumentationWrite = [bool](
     -not $isChildScope -and
     [string]$artifactContract.legacy_write_mode -eq 'dual_write'
 )
+$legacyExecutionPlanPath = if ($legacyDocumentationWrite) {
+    Get-VibeLegacyExecutionPlanPath `
+        -RepoRoot $runtime.repo_root `
+        -Task $Task `
+        -ArtifactRoot $ArtifactRoot `
+        -WorkspaceRoot $WorkspaceRoot
+} else {
+    $null
+}
 $publishedPlanPath = if ($isChildScope) { $planPath } else { $primaryPlanPath }
 $requirementPath = if (-not [string]::IsNullOrWhiteSpace($RequirementDocPath)) {
     $RequirementDocPath
@@ -561,7 +571,7 @@ if ($isChildScope) {
 } else {
     Write-VibeMarkdownArtifact -Path $primaryPlanPath -Lines $lines
     if ($legacyDocumentationWrite) {
-        Write-VibeMarkdownArtifact -Path $planPath -Lines $lines
+        Write-VibeMarkdownArtifact -Path $legacyExecutionPlanPath -Lines $lines
     }
 }
 
@@ -574,7 +584,7 @@ $receipt = [pscustomobject]@{
     requirement_doc_path = $requirementPath
     execution_plan_path = $publishedPlanPath
     primary_plan_path = $primaryPlanPath
-    legacy_execution_plan_path = if ($legacyDocumentationWrite) { $planPath } else { $null }
+    legacy_execution_plan_path = $legacyExecutionPlanPath
     module_work_plan_path = $moduleWorkPlanPath
     child_execution_handoff_path = $childHandoffPath
     canonical_write_allowed = -not $isChildScope
@@ -602,7 +612,7 @@ Write-VibeJsonArtifact -Path $receiptPath -Value $receipt
     session_root = $sessionRoot
     execution_plan_path = $publishedPlanPath
     primary_plan_path = $primaryPlanPath
-    legacy_execution_plan_path = if ($legacyDocumentationWrite) { $planPath } else { $null }
+    legacy_execution_plan_path = $legacyExecutionPlanPath
     module_work_plan_path = $moduleWorkPlanPath
     receipt_path = $receiptPath
     receipt = $receipt

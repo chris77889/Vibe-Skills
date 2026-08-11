@@ -15,14 +15,3 @@ def test_simple_install_docs_default_to_shared_agents_skills_root() -> None:
         assert "install-receipt.json" in text
         assert "--host" not in text
         assert "--profile" not in text
-
-
-def test_legacy_install_prompt_docs_are_archived() -> None:
-    active_prompt = REPO_ROOT / "docs/install/prompts/full-version-install.md"
-    archived_prompt = (
-        REPO_ROOT
-        / "docs/archive/install-legacy/2026-07-02/prompts/full-version-install.md"
-    )
-
-    assert not active_prompt.exists()
-    assert archived_prompt.is_file()

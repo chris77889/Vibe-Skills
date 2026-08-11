@@ -54,7 +54,7 @@ $requiredFiles = @(
     'config/requirement-doc-policy.json',
     'config/plan-execution-policy.json',
     'config/phase-cleanup-policy.json',
-    'docs/requirements/README.md',
+    'docs/governance/README.md',
     'templates/requirements/governed-requirement-template.md',
     'templates/plans/governed-execution-plan-template.md',
     'scripts/runtime/VibeRuntime.Common.ps1',
@@ -81,6 +81,7 @@ Add-Assertion -Results ([ref]$results) -Condition (Test-Path -LiteralPath $runti
 $runtimeContract = Get-Content -LiteralPath (Join-Path $repoRoot 'config\runtime-contract.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 Add-Assertion -Results ([ref]$results) -Condition ($runtimeContract.entry_skill -eq 'vibe') -Message 'runtime contract entry skill is vibe'
 Add-Assertion -Results ([ref]$results) -Condition (@($runtimeContract.stages).Count -eq 6) -Message 'runtime contract defines six fixed stages'
+Add-Assertion -Results ([ref]$results) -Condition (@($runtimeContract.stages | Where-Object { [string]$_.receipt -match 'docs/(requirements|plans)' }).Count -eq 0) -Message 'runtime contract does not require historical requirement or plan directories'
 Add-Assertion -Results ([ref]$results) -Condition ([bool]$runtimeContract.invariants.no_silent_fallback) -Message 'runtime contract forbids silent fallback'
 Add-Assertion -Results ([ref]$results) -Condition ([bool]$runtimeContract.invariants.fallback_hazard_alert_required) -Message 'runtime contract requires fallback hazard alerts'
 Add-Assertion -Results ([ref]$results) -Condition ([bool]$runtimeContract.invariants.no_self_introduced_fallback_without_requirement_approval) -Message 'runtime contract forbids self-introduced fallback without requirement approval'

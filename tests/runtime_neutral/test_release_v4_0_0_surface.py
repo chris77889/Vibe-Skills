@@ -39,21 +39,18 @@ class ReleaseV400SurfaceTests(unittest.TestCase):
         self.assertIn(f"- Version: {EXPECTED_VERSION}", skill_text)
         self.assertIn(f"- Updated: {EXPECTED_UPDATED}", skill_text)
 
-        changelog_text = (REPO_ROOT / "references/changelog.md").read_text(encoding="utf-8")
-        self.assertIn(f"## v{EXPECTED_VERSION} ({EXPECTED_UPDATED})", changelog_text)
-        self.assertIn(f"docs/releases/v{EXPECTED_VERSION}.md", changelog_text)
-
-        release_readme_text = (REPO_ROOT / "docs/releases/README.md").read_text(encoding="utf-8")
-        self.assertIn(f"[`v{EXPECTED_VERSION}.md`](v{EXPECTED_VERSION}.md)", release_readme_text)
-
-        release_note_text = (REPO_ROOT / "docs/releases" / f"v{EXPECTED_VERSION}.md").read_text(encoding="utf-8")
-        self.assertIn(f"# VCO Release v{EXPECTED_VERSION}", release_note_text)
-        self.assertIn(f"- Date: {EXPECTED_UPDATED}", release_note_text)
-        self.assertIn(f"- Commit(base): {EXPECTED_BASE_COMMIT}", release_note_text)
+        # Release metadata now lives in executable configuration and the
+        # append-only ledger. Historical Markdown release surfaces are
+        # intentionally absent from the live documentation control plane.
+        ledger_path = REPO_ROOT / governance["logs"]["release_ledger_jsonl"]
+        self.assertTrue(ledger_path.is_file())
+        self.assertFalse((REPO_ROOT / "references/changelog.md").exists())
+        self.assertFalse((REPO_ROOT / "docs/releases/README.md").exists())
+        self.assertFalse((REPO_ROOT / "docs/releases" / f"v{EXPECTED_VERSION}.md").exists())
 
         ledger_lines = [
             json.loads(line)
-            for line in (REPO_ROOT / "references/release-ledger.jsonl").read_text(encoding="utf-8").splitlines()
+            for line in ledger_path.read_text(encoding="utf-8").splitlines()
             if line.strip()
         ]
         self.assertIn(

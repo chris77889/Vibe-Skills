@@ -102,6 +102,84 @@
       "path": "references/developer-entry-contract.md",
       "owner": "contributor-experience",
       "lifecycle": "live"
+    },
+    {
+      "id": "primary-skill-contract",
+      "path": "SKILL.md",
+      "owner": "runtime-entry",
+      "lifecycle": "live"
+    },
+    {
+      "id": "install-guide-zh",
+      "path": "docs/install/README.md",
+      "owner": "installer",
+      "lifecycle": "live"
+    },
+    {
+      "id": "install-guide-en",
+      "path": "docs/install/README.en.md",
+      "owner": "installer",
+      "lifecycle": "live"
+    },
+    {
+      "id": "troubleshooting-guide",
+      "path": "docs/troubleshooting.md",
+      "owner": "operator-experience",
+      "lifecycle": "live"
+    },
+    {
+      "id": "architecture-entry",
+      "path": "docs/architecture.md",
+      "owner": "runtime-architecture",
+      "lifecycle": "live"
+    },
+    {
+      "id": "documentation-architecture",
+      "path": "docs/docs-information-architecture.md",
+      "owner": "governance",
+      "lifecycle": "live"
+    },
+    {
+      "id": "repository-cleanliness-contract",
+      "path": "docs/repo-cleanliness-governance.md",
+      "owner": "verification",
+      "lifecycle": "live"
+    },
+    {
+      "id": "distribution-contract",
+      "path": "docs/governance/distribution-governance.md",
+      "owner": "distribution",
+      "lifecycle": "live"
+    },
+    {
+      "id": "source-neutral-link-contract",
+      "path": "docs/governance/source-neutral-link-governance.md",
+      "owner": "governance",
+      "lifecycle": "live"
+    },
+    {
+      "id": "observability-contract",
+      "path": "docs/governance/observability-consistency-governance.md",
+      "owner": "verification",
+      "lifecycle": "live"
+    },
+    {
+      "id": "delivery-acceptance-contract",
+      "path": "docs/governance/vibe-governed-project-delivery-acceptance-governance.md",
+      "owner": "runtime-contracts",
+      "lifecycle": "live"
+    },
+    {
+      "id": "origin-provenance-contract",
+      "path": "docs/governance/origin-provenance-policy.md",
+      "owner": "provenance",
+      "lifecycle": "retained"
+    },
+    {
+      "id": "references-entry",
+      "path": "references/index.md",
+      "owner": "contributor-experience",
+      "lifecycle": "live"
     }
   ],
   "stable_entry_links": [
@@ -180,6 +258,6 @@
       "docs/plans"
     ],
     "legacy_removal_release": "4.1.0",
-    "legacy_write_mode": "dual_write"
+    "legacy_write_mode": "disabled"
   }
 }

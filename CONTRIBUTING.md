@@ -97,7 +97,7 @@ contributor zone table to recognize a new file category.
 Always read:
 
 - [`docs/developer-change-governance.md`](docs/developer-change-governance.md)
-- [`docs/distribution-governance.md`](docs/distribution-governance.md)
+- [`docs/governance/distribution-governance.md`](docs/governance/distribution-governance.md)
 - [`docs/repo-cleanliness-governance.md`](docs/repo-cleanliness-governance.md)
 
 ### Mirror, Fixture, Provenance, or Compliance
